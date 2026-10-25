@@ -138,8 +138,22 @@ def apply_gp_metrics(s, result):
     s.distance = _finite(result.get("residual"))
     s.density_gp = _finite(result.get("density_gp"))
     s.uq = _finite(result.get("uncertainty"))
+    # Energy prediction and its uncertainty, for the OUTPUT.txt table.
+    s.energy_gp = _finite(result.get("energy_pred"))
+    s.uq_eng = _finite(result.get("uncertainty_eng"))
     s.gp = dict(result)
     return True
+
+
+# Columns appended after SYMMETRY in the OUTPUT.txt table when `1 : gp` is
+# set: the GP-predicted enthalpy with its uncertainty (UC), then the
+# GP-predicted density with its uncertainty.
+GP_OUTPUT_HEADER = "Enthalpy(GP)        UC  Density(GP)        UC"
+
+
+def gp_output_header(ORG):
+    """Table-title suffix of OUTPUT.txt; empty when GP is disabled."""
+    return GP_OUTPUT_HEADER if gp_enabled(ORG) else ""
 
 
 def _metrics_row(s):

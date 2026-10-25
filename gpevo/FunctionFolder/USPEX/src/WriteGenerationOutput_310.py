@@ -128,12 +128,45 @@ def _individual_id(s, fallback):
     return value if value > 0 else fallback
 
 
-def output_row(s, fallback=0):
+def _gp_columns(s):
+    """``Enthalpy(GP) UC Density(GP) UC`` block for one structure (44 chars).
+
+    ``s.gp`` is the dict ``uspexkit.gp()`` returned, stored by submitJob when
+    the GP step ran in-process.  The individual fields are the fallback for
+    structures evaluated by the CLI, where ReadJobs read them back from
+    CalcFold1/gp.csv.  A blank block is returned when nothing is known, so
+    the table stays rectangular.
+    """
+    e = ue = d = ud = None
+    gp = getattr(s, "gp", None)
+    if isinstance(gp, dict):
+        e, ue = gp.get("energy_pred"), gp.get("uncertainty_eng")
+        d, ud = gp.get("density_gp"), gp.get("uncertainty")
+    values = []
+    for v in (e, ue, d, ud):
+        try:
+            values.append(float(v))
+        except (TypeError, ValueError):
+            values.append(float("nan"))
+    if not all(np.isfinite(v) for v in values):
+        values = [float("nan")] * 4
+        for k, name in enumerate(("energy_gp", "uq_eng", "density_gp", "uq")):
+            try:
+                values[k] = float(getattr(s, name, None))
+            except (TypeError, ValueError):
+                pass
+    if not all(np.isfinite(v) for v in values):
+        return " " * 44
+    return f"{values[0]:12.3f}{values[1]:10.4f}{values[2]:12.3f}{values[3]:10.4f}"
+
+
+def output_row(s, fallback=0, gp=0):
     """Row appended to OUTPUT.txt when one structure finishes.
 
     Mirrors ``WriteOUTPUT.m`` for the columns of the "ID Origin Composition
     Enthalpy Volume KPOINTS SYMMETRY" table; unlike Individuals there is no
-    Gen / Density / Fitness column here.
+    Gen / Density / Fitness column here.  With ``gp`` on, the GP prediction
+    and its uncertainty are appended after SYMMETRY.
     """
     enth = float(np.asarray(s.Enthalpies)[-1])
     volume = _volume(s)
@@ -157,6 +190,7 @@ def output_row(s, fallback=0):
         + volume_s + "  "
         + f"{_kpoints(s):<9s}"
         + sym_s
+        + (_gp_columns(s) if gp else "")
     )
 
 

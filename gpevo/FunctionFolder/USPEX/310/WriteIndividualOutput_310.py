@@ -70,4 +70,4 @@ def WriteIndividualOutput_310(Ind_No):
     update_USPEX_INDIVIDUAL(s, res_folder, getattr(POP, "generation", 0), atom_type)
 
     # One row per finished structure, as WriteOUTPUT.m does in MATLAB.
-    write_log(output_row(s, Ind_No + 1) + "\n")
+    write_log(output_row(s, Ind_No + 1, gp=getattr(ORG, "gp", 0)) + "\n")

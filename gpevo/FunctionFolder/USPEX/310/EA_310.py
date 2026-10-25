@@ -158,7 +158,10 @@ def EA_310():
         write_log(alignLine(f"Proceeding to the generation {POP.generation}") + "\n")
         write_log(f"     {int(ORG.numParallelCalcs):4d} parallel calculations are performed simutaneously\n")
         write_log(alignLine(f"Generation {POP.generation}") + "\n")
-        write_log("  ID   Origin     Composition  Enthalpy(eV)  Volume(A^3)  KPOINTS  SYMMETRY\n")
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import gp_output_header
+        gp_suffix = gp_output_header(ORG)
+        write_log("  ID   Origin     Composition  Enthalpy(eV)  Volume(A^3)  KPOINTS  SYMMETRY"
+                  + (f" {gp_suffix}" if gp_suffix else "") + "\n")
         WriteGenerationStart()
         _im("gpevo.FunctionFolder.USPEX.310.Start_POP_310").Start_POP_310()
 

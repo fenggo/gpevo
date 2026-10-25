@@ -15,6 +15,7 @@ compare_runs.png
 
 # 二进制文件（只保留在本地，不上云）
 *.traj
+*.traj.*
 *.png
 *.svg
 *.pdf
