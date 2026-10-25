@@ -153,6 +153,23 @@ GP_OUTPUT_HEADER = (f"{'Enthalpy(GP)':<12s}{'UC':>10s}"
                     f"{'Density(GP)':>12s}{'UC':>10s}")
 
 
+def apply_pred_metrics(s, entry):
+    """Store what ``uspexkit.pred()`` returned for one structure.
+
+    ``pred()`` returns its predictions, so the re-prediction after a DFT
+    update goes straight onto the individual -- no round-trip through
+    density_predict.log.
+    """
+    if not isinstance(entry, dict):
+        return False
+    s.density_gp = _finite(entry.get("density_gp"))
+    s.uq = _finite(entry.get("uncertainty"))
+    s.energy_gp = _finite(entry.get("energy_pred"))
+    s.uq_eng = _finite(entry.get("uncertainty_eng"))
+    s.gp_pred = dict(entry)
+    return True
+
+
 def _metrics_row(s):
     """Row layout of ``_read_gp_csv``, built from stored per-structure values."""
     return [float("nan"), _finite(getattr(s, "distance", None)), float("nan"),
@@ -239,28 +256,13 @@ def _write_ei_log(ORG, generation, crystals):
         pass
 
 
-def _read_density_predict(path):
-    """Read density_predict.log into ``{crystal_id: density_gp}``.
-
-    Columns: Crystal_id Residual Density_mlp Density_rf Density_gp std_den
-    Energy std_eng — MATLAB reads the 5th column (density_gp).
-    """
-    table = {}
+def _mol_factor(ORG, s):
+    """The ``numMols`` normalisation CalcFitness_310 applies for optType 1."""
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fp:
-            for line in fp:
-                if line.lstrip().startswith("#"):
-                    continue
-                fields = line.split()
-                if len(fields) < 5:
-                    continue
-                try:
-                    table[int(float(fields[0]))] = float(fields[4])
-                except (TypeError, ValueError):
-                    continue
-    except OSError:
-        return {}
-    return table
+        factor = sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))
+    except Exception:
+        return 1.0
+    return factor if factor > 0 else 1.0
 
 
 def _expected_improvement(mu, sigma, f_best):
@@ -409,11 +411,26 @@ def gp_active_learning(ORG, POP, fitness):
             pass
 
     console_print(f"  Running: uspexkit.pred(ids='{' '.join(str(i) for i in pred_ids)}')")
-    _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
-          ncpu=int(params["ncpu"]), den=0.0,
-          ids=" ".join(str(i) for i in pred_ids), dat=params["dat"])
+    ok, results = _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
+                        ncpu=int(params["ncpu"]), den=0.0,
+                        ids=" ".join(str(i) for i in pred_ids), dat=params["dat"])
+    if not ok or not isinstance(results, dict) or not results:
+        console_print("  Warning: uspexkit.pred returned no predictions, "
+                      "fitness left unchanged")
+        return fitness
 
-    predictions = _read_density_predict(pred_log)
+    # Store the re-predictions on the structures; the fitness below then reads
+    # them back from memory.
+    for index, number in zip(valid, numbers):
+        entry = results.get(number)
+        if entry is not None:
+            apply_pred_metrics(POP.POPULATION[index], entry)
+
+    opt_type = int(getattr(ORG, "optType", 1) or 1)
+    # CalcFitness has already applied opt_sign; the replacement below has to
+    # carry it too (it is 1 for a minimisation run, -1 for `-N : optType`).
+    opt_sign = float(getattr(ORG, "opt_sign", 1) or 1)
+
     updated = 0
     skipped = 0
     for index, number in zip(valid, numbers):
@@ -421,9 +438,27 @@ def gp_active_learning(ORG, POP, fitness):
         if row is not None and row[1] > 10:
             skipped += 1
             continue
-        if number in predictions:
-            fitness[index] = -1.0 * predictions[number]
-            updated += 1
+        if opt_type == 1:
+            # Enthalpy target: use the GP-predicted energy, normalised the
+            # same way CalcFitness_310 does (enthalpy / factor).  Previously
+            # this wrote -density for every optType, which silently turned a
+            # minimisation of the enthalpy into a maximisation of the density.
+            value = getattr(POP.POPULATION[index], "energy_gp", None)
+            if value is None or not math.isfinite(float(value)):
+                continue
+            factor = _mol_factor(ORG, POP.POPULATION[index])
+            fitness[index] = opt_sign * (float(value) / max(1e-12, factor))
+        elif opt_type == 11:
+            value = getattr(POP.POPULATION[index], "density_gp", None)
+            if value is None or not math.isfinite(float(value)):
+                continue
+            fitness[index] = opt_sign * (-1.0 * float(value))
+        else:
+            # optType 12/13 mix density with other quantities (entropy,
+            # distance): no single ML value can replace the fitness, so keep
+            # what CalcFitness computed.
+            continue
+        updated += 1
     console_print(f"  Updated fitness for {updated}/{len(valid)} valid crystals "
                   f"(skipped {skipped} with residual > 10)")
     return fitness
