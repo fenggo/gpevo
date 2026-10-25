@@ -6,13 +6,13 @@ requires = ["setuptools>=74.1", "cython>=3.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gpevo"
+name = "GPEvo"
 version = "0.1.0"
-description = "Python port of the USPEX-GP 310 molecular-crystal evolutionary search path"
+description = "GPEvo: Python port of the USPEX-GP 310 molecular-crystal evolutionary search with GP-guided active learning"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "LicenseRef-Proprietary"}
-authors = [{name = "USPEX-GP contributors"}]
+license = {text = "MIT"}
+authors = [{name = "FengGo"}]
 dependencies = [
     "numpy>=1.21",
     "scipy>=1.7",
@@ -26,6 +26,7 @@ dev = [
 ]
 
 [project.scripts]
+# 发行名是 GPEvo；命令按 CLI 惯例保持小写。
 gpevo = "gpevo.cli:main"
 
 [tool.setuptools.packages.find]
