@@ -96,7 +96,6 @@ gpevo/                        # Python 包
   cli.py                      # 控制台入口
   runtime.py  inputparser.py  log_utils.py  matrix.py  importers.py
 gpevo.py                      # 免安装入口（仓库根目录运行）
-USPEX.m                       # 遗留 MATLAB 入口，Python 路径不需要
 compare_runs.py  plot_dft.py  # 结果绘图工具
 ei_select.py  clean.py        # EI 日志 / 清理脚本
 example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
@@ -104,7 +103,7 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 
 ## 遗留说明
 
-MATLAB / OCTAVE 源码树不在本仓库内；`USPEX.m` 仅作为入口参考保留。Python 路径不需要 `USPEXPATH` 环境变量，也不需要配置 MATLAB path。
+MATLAB / OCTAVE 源码树不在本仓库内，Python 路径也不需要它们：不需要 `USPEXPATH` 环境变量，不需要配置 MATLAB path，入口只有 `gpevo` / `python -m gpevo` / `python gpevo.py` 三种。
 
 ## License
 
