@@ -46,10 +46,10 @@ def Initialize():
     log_path = os.path.join(POP.resFolder, log_file)
     os.makedirs(POP.resFolder, exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as fp:
-        from gpevo.FunctionFolder.USPEX.src.gp_ml import gp_output_header
-        gp_suffix = gp_output_header(ORG)
-        fp.write("  ID   Origin     Composition  Enthalpy(eV)  Volume(A^3)  KPOINTS  SYMMETRY"
-                 + (f" {gp_suffix}" if gp_suffix else "") + "\n")
+        from gpevo.FunctionFolder.USPEX.src.WriteGenerationOutput_310 import (
+            output_table_header,
+        )
+        fp.write(output_table_header(getattr(ORG, "gp", 0)) + "\n")
     return POP
 
 

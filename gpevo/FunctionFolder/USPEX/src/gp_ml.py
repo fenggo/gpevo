@@ -147,13 +147,10 @@ def apply_gp_metrics(s, result):
 
 # Columns appended after SYMMETRY in the OUTPUT.txt table when `1 : gp` is
 # set: the GP-predicted enthalpy with its uncertainty (UC), then the
-# GP-predicted density with its uncertainty.
-GP_OUTPUT_HEADER = "Enthalpy(GP)        UC  Density(GP)        UC"
-
-
-def gp_output_header(ORG):
-    """Table-title suffix of OUTPUT.txt; empty when GP is disabled."""
-    return GP_OUTPUT_HEADER if gp_enabled(ORG) else ""
+# GP-predicted density with its uncertainty.  The widths (12/10/12/10) match
+# the value columns of WriteGenerationOutput_310._gp_columns.
+GP_OUTPUT_HEADER = (f"{'Enthalpy(GP)':<12s}{'UC':>10s}"
+                    f"{'Density(GP)':>12s}{'UC':>10s}")
 
 
 def _metrics_row(s):

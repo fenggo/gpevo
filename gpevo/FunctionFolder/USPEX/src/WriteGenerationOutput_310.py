@@ -160,6 +160,35 @@ def _gp_columns(s):
     return f"{values[0]:12.3f}{values[1]:10.4f}{values[2]:12.3f}{values[3]:10.4f}"
 
 
+def output_table_header(gp=0):
+    """Title line of the OUTPUT.txt table, aligned with ``output_row``.
+
+    The label texts are the ones MATLAB writes; only the spacing follows the
+    column boundaries of the data rows, so every label sits over its column
+    (the raw MATLAB header is 6 characters longer than its own rows).  With
+    ``gp`` on, the GP prediction columns are appended after SYMMETRY, exactly
+    over the values ``_gp_columns`` writes.
+    """
+    h = ("ID"               # 0-1    id, right-aligned like the data
+         "  "               # 2-3
+         "Origin"           # 4-9    data column 7-17
+         "     "            # 10-14
+         "Composition"      # 15-25  data column 18-32
+         " "                # 26
+         "Enthalpy(eV)"     # 27-38  data values end at 42
+         " "                # 39
+         "Volume(A^3)"      # 40-50  data values end at 51
+         " "                # 51
+         "KPOINTS"          # 52-58  data column 54-62
+         " "                # 59
+         "SYMMETRY"         # 60-67  data column 63-65
+         " ")               # 68     gap before the GP columns
+    if gp:
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import GP_OUTPUT_HEADER
+        h += GP_OUTPUT_HEADER       # 69-112, same 12/10/12/10 split as the data
+    return h
+
+
 def output_row(s, fallback=0, gp=0):
     """Row appended to OUTPUT.txt when one structure finishes.
 
