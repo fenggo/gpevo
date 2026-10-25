@@ -1,0 +1,25 @@
+# Python 构建产物
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Cython 生成物（pip install . 时会从 .pyx 重新编译）
+*.so
+gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.c
+
+# 运行/训练产物
+*.pkl
+compare_runs.png
+
+# 二进制文件（只保留在本地，不上云）
+*.traj
+*.png
+*.svg
+*.pdf
+pot.almtp
+gpevo/FunctionFolder/spacegroup/random_cell_mol
+
+# Jupyter
+.ipynb_checkpoints/

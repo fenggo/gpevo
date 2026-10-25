@@ -1,0 +1,49 @@
+[build-system]
+# setuptools>=74.1 is required for the [[tool.setuptools.ext-modules]]
+# table below (older releases ignore it and ship gpevo without the compiled
+# random_cell_mol_cy extension, silently falling back to the Fortran binary).
+requires = ["setuptools>=74.1", "cython>=3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpevo"
+version = "0.1.0"
+description = "Python port of the USPEX-GP 310 molecular-crystal evolutionary search path"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "LicenseRef-Proprietary"}
+authors = [{name = "USPEX-GP contributors"}]
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "networkx>=2.6",
+    "spglib>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+gpevo = "gpevo.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gpevo*"]
+
+[tool.setuptools.package-data]
+gpevo = [
+    "FunctionFolder/spacegroup/__init__.py",
+    "FunctionFolder/spacegroup/random_cell_mol.py",
+    "FunctionFolder/spacegroup/random_cell_mol",
+    "FunctionFolder/spacegroup/data/*.txt",
+    "FunctionFolder/sys/uspex_fast_core.pyx",
+    "FunctionFolder/sys/*.so",
+]
+
+# Cython port of the `random_cell_mol` Fortran binary.  Built by `pip install .`
+# (Cython comes from build-system.requires, so no manual `cythonize` step).
+[[tool.setuptools.ext-modules]]
+name = "gpevo.FunctionFolder.spacegroup.random_cell_mol_cy"
+sources = ["gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.pyx"]

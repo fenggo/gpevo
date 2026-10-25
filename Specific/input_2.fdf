@@ -1,0 +1,87 @@
+
+################## Species and atoms ##################
+SystemName       siesta
+SystemLabel      siesta
+   
+%block ChemicalSpeciesLabel
+1 6 C
+2 8 O
+3 7 N
+4 1 H
+%endblock ChemicalSpeciesLabel
+   
+   
+SolutionMethod   Diagon # ## OrderN or Diagon
+PAO.BasisType    split
+%block PAO.Basis
+C      3
+ n=2    0    2  S .5000000
+   5.3583962   0.0
+   1.000   1.000
+ n=2    1    2  S .3123723
+   5.7783757   0.0
+   1.000   1.000
+ n=3    2    1
+   4.5649411
+   1.000
+O     3
+ n=2    0    2  S .3704717
+   5.1368012   0.0
+   1.000   1.000
+ n=2    1    2  S .5000000
+   5.7187560   0.0
+   1.000   1.000
+ n=3    2    1
+   3.0328434
+   1.000
+N     3 
+ n=2    0    2  S .3474598
+   6.7354564   0.0
+   1.000   1.000
+ n=2    1    2  S .3640613
+   5.9904928  0.0
+   1.000   1.000
+ n=3    2    1
+   4.9981827
+   1.000
+H     2
+ n=1    0    2  S .7020340
+   4.4302740  0.0
+   1.000   1.000
+ n=2    1    1
+   4.7841521
+   1.000
+%endblock PAO.Basis
+   
+SpinPolarized    F
+   
+DM.MixingWeight      0.4   
+DM.NumberPulay       9
+DM.Tolerance         1.d-4
+   
+   
+###################   RunInfo  ###################
+MD.TypeOfRun     CG  # CG/FIRE optimize Verlet MD
+MD.VariableCell  true
+MD.TargetStress  0.000000 GPa
+MD.Steps         120
+MD.MaxCGDispl    0.1 Ang 
+MD.MaxForceTol   0.05 eV/Ang 
+MD.UseSaveXV     F 
+MD.UseSaveZM     false 
+   
+   
+################### FUNCTIONAL ###################
+XC.functional    GGA    # Exchange-correlation functional type
+XC.Authors       PBE    # Particular parametrization of xc func
+MeshCutoff       200. Ry # Equivalent planewave cutoff for the grid 
+   
+   
+WriteCoorInitial T
+WriteCoorXmol    T
+WriteMDhistory   T
+WriteMullikenPop 1
+WriteForces      T
+   
+###################  GEOMETRY  ###################
+

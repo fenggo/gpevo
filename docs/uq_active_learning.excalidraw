@@ -1,0 +1,227 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hermes-agent",
+  "elements": [
+    {
+      "type": "rectangle", "id": "bg_calc", "x": 50, "y": 40, "width": 720, "height": 680,
+      "roundness": { "type": 3 }, "backgroundColor": "#f8f9fa", "fillStyle": "solid",
+      "strokeColor": "#adb5bd", "strokeWidth": 1, "opacity": 60
+    },
+    {
+      "type": "text", "id": "t_bg", "x": 220, "y": 48, "width": 380, "height": 25,
+      "text": "CalcFitness_310.m  —  UQ-Driven Active Learning", "fontSize": 18, "fontFamily": 1,
+      "strokeColor": "#495057", "originalText": "CalcFitness_310.m  —  UQ-Driven Active Learning", "autoResize": true
+    },
+    {
+      "type": "rectangle", "id": "start", "x": 280, "y": 90, "width": 260, "height": 50,
+      "roundness": { "type": 3 }, "backgroundColor": "#e9ecef", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_start", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_start", "x": 285, "y": 100, "width": 250, "height": 20,
+      "text": "After Fitness Calculation", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "start", "originalText": "After Fitness Calculation", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a0", "x": 410, "y": 140, "width": 0, "height": 40,
+      "points": [[0,0],[0,40]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "rectangle", "id": "find_best", "x": 280, "y": 180, "width": 260, "height": 50,
+      "roundness": { "type": 3 }, "backgroundColor": "#a5d8ff", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_find_best", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_find_best", "x": 285, "y": 190, "width": 250, "height": 20,
+      "text": "Find Best Structure (min fitness)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "find_best", "originalText": "Find Best Structure (min fitness)", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a1", "x": 410, "y": 230, "width": 0, "height": 40,
+      "points": [[0,0],[0,40]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "rectangle", "id": "query_gp", "x": 280, "y": 270, "width": 260, "height": 50,
+      "roundness": { "type": 3 }, "backgroundColor": "#ffd8a8", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_query_gp", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_query_gp", "x": 285, "y": 280, "width": 250, "height": 20,
+      "text": "Query gp.csv for Uncertainty", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "query_gp", "originalText": "Query gp.csv for Uncertainty", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a2", "x": 410, "y": 320, "width": 0, "height": 40,
+      "points": [[0,0],[0,40]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "diamond", "id": "decision", "x": 310, "y": 360, "width": 200, "height": 100,
+      "backgroundColor": "#fff3bf", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_decision", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_decision", "x": 315, "y": 375, "width": 190, "height": 40,
+      "text": "Uncertainty\n> Threshold?", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "decision", "originalText": "Uncertainty\n> Threshold?", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_no", "x": 310, "y": 410, "width": 0, "height": 50,
+      "points": [[0,0],[0,50]], "endArrowhead": "arrow",
+      "boundElements": [{ "id": "t_no", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_no", "x": 260, "y": 420, "width": 30, "height": 20,
+      "text": "No", "fontSize": 16, "fontFamily": 1, "strokeColor": "#868e96",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "a_no", "originalText": "No", "autoResize": true
+    },
+    {
+      "type": "rectangle", "id": "continue", "x": 280, "y": 460, "width": 260, "height": 50,
+      "roundness": { "type": 3 }, "backgroundColor": "#b2f2bb", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_continue", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_continue", "x": 285, "y": 470, "width": 250, "height": 20,
+      "text": "Return Fitness (no action)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "continue", "originalText": "Return Fitness (no action)", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_yes", "x": 510, "y": 410, "width": 180, "height": 0,
+      "points": [[0,0],[180,0]], "endArrowhead": "arrow",
+      "boundElements": [{ "id": "t_yes", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_yes", "x": 570, "y": 395, "width": 30, "height": 20,
+      "text": "Yes", "fontSize": 16, "fontFamily": 1, "strokeColor": "#e03131",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "a_yes", "originalText": "Yes", "autoResize": true
+    },
+    {
+      "type": "rectangle", "id": "bg_loop", "x": 690, "y": 340, "width": 340, "height": 410,
+      "roundness": { "type": 3 }, "backgroundColor": "#fff3bf", "fillStyle": "solid",
+      "strokeColor": "#f59f00", "strokeWidth": 1, "opacity": 50
+    },
+    {
+      "type": "text", "id": "t_bg_loop", "x": 720, "y": 348, "width": 280, "height": 20,
+      "text": "Active Learning Cycle", "fontSize": 16, "fontFamily": 1, "strokeColor": "#e8590c",
+      "originalText": "Active Learning Cycle", "autoResize": true
+    },
+    {
+      "type": "rectangle", "id": "step1", "x": 720, "y": 380, "width": 280, "height": 60,
+      "roundness": { "type": 3 }, "backgroundColor": "#d0bfff", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_step1", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_step1", "x": 725, "y": 390, "width": 270, "height": 40,
+      "text": "Step 1: Generate Trajectory\n(uspexkit traj)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "step1", "originalText": "Step 1: Generate Trajectory\n(uspexkit traj)", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_s1", "x": 860, "y": 440, "width": 0, "height": 30,
+      "points": [[0,0],[0,30]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "rectangle", "id": "step2", "x": 720, "y": 470, "width": 280, "height": 60,
+      "roundness": { "type": 3 }, "backgroundColor": "#ffc9c9", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_step2", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_step2", "x": 725, "y": 480, "width": 270, "height": 40,
+      "text": "Step 2: DFT Calculation\n(uspexkit calc)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "step2", "originalText": "Step 2: DFT Calculation\n(uspexkit calc)", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_s2", "x": 860, "y": 530, "width": 0, "height": 30,
+      "points": [[0,0],[0,30]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "rectangle", "id": "step3", "x": 720, "y": 560, "width": 280, "height": 60,
+      "roundness": { "type": 3 }, "backgroundColor": "#a5d8ff", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_step3", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_step3", "x": 725, "y": 570, "width": 270, "height": 40,
+      "text": "Step 3: Retrain GP & Predict\n(uspexkit pred)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "step3", "originalText": "Step 3: Retrain GP & Predict\n(uspexkit pred)", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_s3", "x": 860, "y": 620, "width": 0, "height": 30,
+      "points": [[0,0],[0,30]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "rectangle", "id": "update", "x": 720, "y": 650, "width": 280, "height": 60,
+      "roundness": { "type": 3 }, "backgroundColor": "#b2f2bb", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_update", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_update", "x": 725, "y": 660, "width": 270, "height": 40,
+      "text": "Update Fitness with\nGP Predicted Density", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "update", "originalText": "Update Fitness with\nGP Predicted Density", "autoResize": true
+    },
+    {
+      "type": "rectangle", "id": "return", "x": 280, "y": 540, "width": 260, "height": 50,
+      "roundness": { "type": 3 }, "backgroundColor": "#e9ecef", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_return", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_return", "x": 285, "y": 550, "width": 250, "height": 20,
+      "text": "Return to EA Loop", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "return", "originalText": "Return to EA Loop", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_ret1", "x": 410, "y": 510, "width": 0, "height": 30,
+      "points": [[0,0],[0,30]], "endArrowhead": "arrow"
+    },
+    {
+      "type": "arrow", "id": "a_ret2", "x": 860, "y": 710, "width": -180, "height": 0,
+      "points": [[0,0],[-180,0]], "endArrowhead": "arrow",
+      "strokeStyle": "dashed"
+    },
+    {
+      "type": "arrow", "id": "a_ret3", "x": 680, "y": 710, "width": -270, "height": -170,
+      "points": [[0,0],[-270,-170]], "endArrowhead": "arrow",
+      "strokeStyle": "dashed"
+    },
+    {
+      "type": "rectangle", "id": "data_io", "x": 50, "y": 620, "width": 200, "height": 80,
+      "roundness": { "type": 3 }, "backgroundColor": "#c3fae8", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_data_io", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_data_io", "x": 55, "y": 630, "width": 190, "height": 60,
+      "text": "I/O Files\nInput: gp.csv, INPUT.txt\nOutput: density_predict.log", "fontSize": 14, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "data_io", "originalText": "I/O Files\nInput: gp.csv, INPUT.txt\nOutput: density_predict.log", "autoResize": true
+    },
+    {
+      "type": "arrow", "id": "a_data1", "x": 250, "y": 660, "width": 90, "height": 0,
+      "points": [[0,0],[90,0]], "endArrowhead": "arrow", "strokeStyle": "dotted",
+      "strokeColor": "#868e96"
+    },
+    {
+      "type": "rectangle", "id": "config", "x": 50, "y": 540, "width": 200, "height": 60,
+      "roundness": { "type": 3 }, "backgroundColor": "#f8f9fa", "fillStyle": "solid",
+      "boundElements": [{ "id": "t_config", "type": "text" }]
+    },
+    {
+      "type": "text", "id": "t_config", "x": 55, "y": 550, "width": 190, "height": 40,
+      "text": "Configurable via INPUT.txt\n--n=N  --data=DIR  --u=THRESHOLD", "fontSize": 14, "fontFamily": 1, "strokeColor": "#1e1e1e",
+      "textAlign": "center", "verticalAlign": "middle",
+      "containerId": "config", "originalText": "Configurable via INPUT.txt\n--n=N  --data=DIR  --u=THRESHOLD", "autoResize": true
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  }
+}

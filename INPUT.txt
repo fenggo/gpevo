@@ -1,0 +1,80 @@
+******************************************
+*      TYPE OF RUN AND SYSTEM            *
+******************************************
+USPEX  : calculationMethod (USPEX, VCNEB, META)
+310    : calculationType (dimension: 0-3; molecule: 0/1; varcomp: 0/1)
+1      : optType 
+0.2    : SymTolerance
+1      : checkMolecules
+
+% atomType
+C O N H
+% EndAtomType
+
+% numSpecies
+1 1
+% EndNumSpecies
+
+******************************************
+*               POPULATION               *
+******************************************
+30    : populationSize
+0     : initialPopSize
+50    : numGenerations
+10    : stopCrit 
+0.7   : bestFrac 
+******************************************
+*          VARIATION OPERATORS           *
+****************************************
+0.2    : fracGene 
+0.05   : fracRand 
+0.1    : fracTopRand
+0.15   : fracLatMut
+0.02   : fracPerm
+0.58   : fracRotMut
+
+
+10    :  RmaxFing  
+0.04  :  deltaFing 
+0.015 :  sigmaFing 
+
+
+% IonDistances
+1.74 1.69 1.71 1.29
+1.69 1.64 1.66 1.24
+1.71 1.66 1.69 1.26    
+1.29 1.24 1.26 1.02
+% EndDistances
+
+% MolCenters
+2.5   2.65
+2.65  2.7
+% EndMol
+
+
+% Latticevalues
+2600
+% Endvalues
+
+******************************************
+*   DETAILS OF AB INITIO CALCULATIONS    * 
+******************************************
+% abinitioCode 
+3 3 3
+% ENDabinit
+
+% KresolStart
+0.10 0.10
+% Kresolend
+
+% commandExecutable
+mpirun -n 24 gulp< input > output
+uspexkit fixbroken --b=1.5 --s=1.2 --n=8 --data=data11_22
+mpirun -n 24 gulp< input > output
+uspexkit gp --n=24 --data=data11_22 --u=0.04
+% EndExecutable
+%%%%%%%%%%%%%%%%%%
+
+1      : numParallelCalcs
+0      : whichCluster
+0.0    : ExternalPressure (GPa)

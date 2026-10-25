@@ -1,0 +1,50 @@
+ 1. 精英保留每代都被丢掉 — EA_310.py:124-126 做了 MATLAB 没有的 pool = pool[:target] 裁剪。而 createORG_EA.py:94-112 让 howMany* 之和恰好等于
+  populationSize，KeepBestStructures.py:34 又把精英追加在尾部 → 每代必然被裁。注释里写的 "preserving kept-best at end" 与实际相反。对照 EA_310.m:105-107（不裁剪）。
+  2. rank 语义不同 — FitnessRankingCorrection.py 是恒等函数，而 FitnessRankingCorrection.m:4-33 负责 sort(fitness)、degradeSimilar 去重并写 POP.ranking/bad_rank/fitness。Python
+   的 ranking 实际来自 ReRank.py（按焓升序），且 ReRank.py 只是写 ranking，不像 sys/ReRank.m:12-16 那样按 sum(numIons) 降序真正重排 POPULATION。后果：精英挑选、父代选择、BEST
+  输出全部按焓而非 fitness，optType=11/12/13 时尤其失真。另外 EA_310.py:62 在 CalcFitness 前多调了一次 ReRank（MATLAB 只在 Start_POP_310.m:43 调）。
+  3. 父代选择没有锦标赛 — Heredity_310.py:20、Permutation_310.py、Rotation_310.py、LatMutation_310.py、SoftModeMutation_310.py 全部均匀随机取样；MATLAB 一律走
+  ORG.tournament（如 Heredity_310.m:22-32）。Python 侧没有 tournament 字段——因为 update_STUFF.m:128-140 没被移植（见第 6 条）。
+  4. 三个关键函数没有移植 — update_STUFF（EA_310.m:75，锦标赛 + frac 自适应 + RL plate 臂
+  prob）、compositionStatistic（EA_310.m:61）、pickAntiSeeds/ANTISEEDS（Start.m:54-58）。Python 的算子比例是初始化时算一次就固定（createORG_EA.py:86-112），且 ratio 里
+  howManyTrans 恒为 0。
+  5. Seeds 完全不参与演化 — pick_Seeds.py:64-80 只统计 Seeds/POSCARS 的块数返回；pick_Seeds.m:122-149 会真正建个体并塞进 POPULATION。种子结构被静默丢弃，只有日志计数是"对的"。
+  6. KeepBestStructures 判据大幅简化 — KeepBestStructures.py:14-16 直接取 ranking 前 keepBestHM 个；MATLAB KeepBestStructures.m:7-9（bestFrac/bad_rank
+  限制）、:21-51（凸包优先）、:73-193（toleranceBestHM + 指纹去相似）、:207（焓要除以 sum(numIons)）、:211-215（reoptOld）都没有。
+
+  中等
+
+  7. CalcFitness_310.py:18 用 >=9999 → 100000，MATLAB CalcFitness_310.m:10/104 是 <9999 门控、>99999 才置失败。落在 1e4–1e5 的焓会被 Python 误判为失败个体。
+  8. CalcFitness_310.py:41-44：optType 2/3/4/6/7/8/9/10/1101-1111 全部静默降级成焓，无报错，容易让人以为在优化 hardness/gap/弹性。
+  9. CalcFitness_310.py:54-55：optType=12 在 gen>1 的离群者剔除（.m:96-111）被注释掉。
+  10. StopRun.py 没有 stopCrit / SameBest 分支（StopRun.m:12-18），只判代数和 stopFitness；min(fitness) 遇到 NaN（optType=13 会产生）行为也与 MATLAB 不同。
+  11. Correlation.py 算的是"索引 vs 秩"≈±1，Correlation.m:8-33 算 structure order vs fitness 的相关并写 ORG.cor_dir。
+  12. 初始化缺失：Initialize.py 没做 fixRndSeed 定种（Initialize.m:24-26，Start.py:22 只用时钟 → 结果不可复现）、没写 Individuals/OUTPUT.txt 表头、没调
+  WriteGenerationStart()、INDcopy INPUT.txt → Parameters.txt（Start.m:35）；重启路径没有 checkCompatibility()；calcTypeStr() 没有负号分支（.m:38-41，310 用不到但迟早踩）。
+  13. 分子体系指纹容差缺省值丢失：createORG_Fingerprint.py:21-26 没有 MATLAB createORG_Fingerprint.m:27-35 中 molecule==1 时的 toleranceFing=0.05 / toleranceBestHM=0.10，退化成
+   0.008/0.02。
+  14. write 侧缩水：WriteGenerationOutput_310.py 只写 4 个文件且 best 用 argmin(fitness)（.m:8 用 ranking(1)）；WriteGenerationBackup.py 存顶层而非 generationN/。
+
+15  POP.convex_hull 在 Python 里恒为空（Transform_Convex_Hull 未移植），所以第 2 条目前是死路径；真要用凸包得先移植那个函数
+  轻微 / 可接受
+
+  - 变异算子本身是简化版oherency：Heredity 无切片字面上latticecross 遗传、SoftModeMutation 退化为随机平移、LatMutation 无保体积与 latticeCheck、Rotation 无 rotProb/Euler 混合
+  —— 都属于"知道就好"，但你可能想补。
+  - Reading.py 少了 distanceCheck 失败判定（Reading.m:37-47）与 Clean_AbinitCode。
+  - submitJob.py 每次提交后不 safesave（SubmitJobs_310.m:31）；tnt/ 是运行残留目录。
+  - CalcFitness_ei.m / CalcFitness_ucb.m / PyXtalRandom_310.m 是历史备份，全仓库无调用点，不用移植。
+
+  两份代码树的漂移
+
+  目前只有 gpevo/FunctionFolder/Submission/submitJob.py:249（一行 print 被注释掉）+ tnt/、random_cell_mol_cy.c 的差异，本体是同步的。
+
+
+##### TODO
+
+AlphaFold3
+看一下/home/feng/alphafold3代码,看看对gpevo-codebuddy包有借鉴的地方吗? 
+
+4. 加权聚类采样 — data/weighted_pdb_sampler.py:43-150
+  - AF3 的 (β/cluster_size)·(类型权重) 公式，把"链/界面聚类"换成"成分/formula 聚类"就能用在上 gpevo 的父代选择或 GP 训练集采样。gpevo 现在的 tournament 选择完全按
+  ranking，没有集群平衡。
+

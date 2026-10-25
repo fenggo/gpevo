@@ -1,0 +1,27 @@
+训练MLIP（MTP）力场
+
+1. 收集数据
+   将待训练结构打包在samples.traj里面，复制到"~/train/"文件夹中。
+   使用脚本：./uspexkit.py sample --i='2332 2338 2360' 生成。
+
+2. DFT(siesta)计算
+   运行lm.py脚本： ./lm.py
+   等待脚本运行完成。
+
+3. 运行脚本train_torch.py,
+   ./train_torch.py --e=0
+  
+4. 生成MLP数据
+   进入~/train/data文件夹，运行命令，生成train.cfg：
+   ./ase_to_mtp.py --t='cf11 cf12 cf13 cf21  ct11  fox7 tnt fox nm2 nmc ct2 hc11 mdni dnmt'
+   ./ase_to_mtp.py --t='h2o2 ct4 cl20 ct11 ct12 ctexp tnt tntc nm2 ct2 mdni dnmt'   #### 当前使用
+
+5. 将train.cfg拷贝到～/train文件夹中，并执下面两条命令：
+   i) 计算最小原子间距 
+   mlp mindist train.cfg
+   ii) 并行计算
+   mpirun -n 20 mlp train pot.almtp train.cfg --save_to=pot.almtp  --iteration_limit=1000 --force_weight=1.0 --tolerance=0.0001
+
+6. 训练完成后，将模型参数文件pot.almtp拷至～/uspex_mdni/Specific/文件夹中
+
+7. 提交USPEX计算

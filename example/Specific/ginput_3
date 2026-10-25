@@ -1,0 +1,7 @@
+
+library reaxff_nn
+
+maxcyc opt 1000
+
+output cif gulp
+
