@@ -75,3 +75,7 @@ def WriteIndividualOutput_310(Ind_No):
 
     # One row per finished structure, as WriteOUTPUT.m does in MATLAB.
     write_log(output_row(s, Ind_No + 1, gp=getattr(ORG, "gp", 0)) + "\n")
+    # ... and the matching row of resFolder/origin (WriteOUTPUT.m:78).
+    from gpevo.FunctionFolder.USPEX.src.WriteOrigin import append_origin
+
+    append_origin(res_folder, count, s)

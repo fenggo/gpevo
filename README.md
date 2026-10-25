@@ -55,7 +55,7 @@ gpevo                # 或 python -m gpevo
 | 文件/目录 | 内容 |
 |---|---|
 | `OUTPUT.txt` | 运行日志，含逐代 `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` 表；GP 开启时追加 `Enthalpy(GP) UC Density(GP) UC` 四列 |
-| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`gp_gen1.png`、`density_predict.log` |
+| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`origin`、`gp_gen1.png`、`density_predict.log` |
 | `CalcFold1/`… | 每个结构的弛豫/GP 计算目录，`gp.csv` 记录每次 GP 预测 |
 | `ei.log` | 每代 EI 选中的晶体 ID |
 
@@ -72,6 +72,20 @@ frames = read("results1/Individuals.traj", index=":")
 print(frames[0].info)                          # 与 Individuals 行对应的元数据
 print(frames[0].get_potential_energy())        # 焓 (eV)
 ```
+
+`origin` 记录每个结构由哪个算子产生、父本是谁（`WriteOUTPUT.m` 的
+`resFolder/origin`），是 `makeFigures.m` 给结构按算子着色的数据源：
+
+```
+ ID    Origin    Enthalpy   Parent-E   Parent-ID
+   1   Random      -0.829    -0.829  [         0]
+   2   Seeds       -1.956    [          ]
+ 223 keptBest      -1.988    -1.988  [       151]
+```
+
+`Enthalpy`/`Parent-E` 都是**每原子**焓（`Enthalpies(end)/sum(numIons)`）；
+无父本的结构（random）`Parent-ID` 为 `0` 并重复自身焓，种子结构父本信息为空，
+故 `Parent-E` 留空。格式与 MATLAB 版逐字节一致（含空父本时的空白列）。
 
 4. 运行结束后用 `compare_runs.py` 对比多次运行：
 

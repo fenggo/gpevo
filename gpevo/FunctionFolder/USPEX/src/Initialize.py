@@ -50,6 +50,14 @@ def Initialize():
             output_table_header,
         )
         fp.write(output_table_header(getattr(ORG, "gp", 0)) + "\n")
+    # Title of resFolder/origin (Initialize.m:84); append_origin recreates it
+    # should the file ever be missing, so a resumed run stays readable.
+    from gpevo.FunctionFolder.USPEX.src.WriteOrigin import _HEADER, _origin_path
+
+    origin_path = _origin_path(POP.resFolder)
+    if not os.path.exists(origin_path) or os.path.getsize(origin_path) == 0:
+        with open(origin_path, "a", encoding="utf-8") as fp:
+            fp.write(_HEADER + "\n")
     return POP
 
 
