@@ -7,7 +7,9 @@ of a shell command.  Two call sites are covered:
   the relaxations (used to be a ``uspexkit gp`` line in commandExecutable).
 * ``gp_active_learning``— port of the "GPML active learning with EI top-K"
   block of CalcFitness_310.m:114-422, which used to shell out to
-  ``uspexkit traj`` / ``uspexkit calc`` / ``uspexkit pred``.
+  ``uspexkit traj`` / ``uspexkit calc`` / ``uspexkit pred``.  The traj
+  conversion is gone: ``WriteIndividualOutput_310`` appends a frame to
+  ``Individuals.traj`` for every structure it writes to gatheredPOSCARS.
 
 Both are configured from INPUT.txt: ``1 : gp`` (switch), ``data : <dir>`` and
 ``den : <density>``.
@@ -373,9 +375,14 @@ def gp_active_learning(ORG, POP, fitness):
         return fitness
     crystal_ids = " ".join(str(int(s[0])) for s in selected)
 
-    # Step 3: trajectory for the whole generation (once)
-    console_print(f"  Running: uspexkit.traj() in {res_folder}")
-    if not _call("traj", cwd=res_folder, fposcar="gatheredPOSCARS")[0]:
+    # Step 3: the trajectory already exists -- WriteIndividualOutput_310
+    # appends a frame to Individuals.traj for every structure that goes into
+    # gatheredPOSCARS, so no conversion step is needed here.
+    traj_file = os.path.join(res_folder, "Individuals.traj")
+    if not os.path.isfile(traj_file):
+        console_print("  Warning: Individuals.traj is missing in "
+                      f"{res_folder}; this run directory predates the "
+                      "per-structure trajectory, skipping calc/pred")
         return fitness
 
     # Step 4: DFT on the selected crystals

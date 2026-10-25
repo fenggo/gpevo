@@ -11,6 +11,7 @@ from gpevo.log_utils import write_log
 from gpevo.FunctionFolder.sys.Write_POSCAR import Write_POSCAR, Write_POSCAR_order
 from gpevo.FunctionFolder.sys.anasym_stokes import anasym_stokes, symmetrized_cif
 from gpevo.FunctionFolder.USPEX.src.WriteGenerationOutput_310 import output_row
+from gpevo.FunctionFolder.USPEX.src.WriteIndividualsTraj import append_individuals_traj
 
 
 def _append_file(src, dst):
@@ -61,6 +62,9 @@ def WriteIndividualOutput_310(Ind_No):
 
     Write_POSCAR(atom_type, count, symg, num_ions, lattice, coor)
     _append_file("POSCAR", os.path.join(res_folder, "gatheredPOSCARS"))
+    # ASE-readable twin of the block just appended: same trigger, same order,
+    # so Individuals.traj and gatheredPOSCARS can never drift apart.
+    append_individuals_traj(res_folder, s, atom_type, getattr(POP, "generation", 0))
     Write_POSCAR_order(atom_type, count, symg, num_ions, lattice, coor, order)
     _append_file("POSCAR_order", os.path.join(res_folder, "gatheredPOSCARS_order"))
 

@@ -55,9 +55,23 @@ gpevo                # 或 python -m gpevo
 | 文件/目录 | 内容 |
 |---|---|
 | `OUTPUT.txt` | 运行日志，含逐代 `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` 表；GP 开启时追加 `Enthalpy(GP) UC Density(GP) UC` 四列 |
-| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`gp_gen1.png`、`density_predict.log` |
+| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`gp_gen1.png`、`density_predict.log` |
 | `CalcFold1/`… | 每个结构的弛豫/GP 计算目录，`gp.csv` 记录每次 GP 预测 |
 | `ei.log` | 每代 EI 选中的晶体 ID |
+
+`Individuals.traj` 是 `gatheredPOSCARS` 的 ASE 可读版本：每个结构算完即追加一帧，
+帧序与 `Individuals` 表一致（`numParallelCalcs=1` 时严格一致），第 *i* 帧就是
+`Individuals` 中 ID 为 *i+1* 的那个结构。帧的 `atoms.info` 带有
+`Number / generation / howCome / symg / enthalpy / density`（有 GP 预测时还有
+`energy_pred / uncertainty_eng / density_gp / uncertainty`），焓同时挂为单点能量，
+可直接分析：
+
+```python
+from ase.io import read
+frames = read("results1/Individuals.traj", index=":")
+print(frames[0].info)                          # 与 Individuals 行对应的元数据
+print(frames[0].get_potential_energy())        # 焓 (eV)
+```
 
 4. 运行结束后用 `compare_runs.py` 对比多次运行：
 
