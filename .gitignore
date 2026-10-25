@@ -20,7 +20,9 @@ compare_runs.png
 *.svg
 *.pdf
 pot.almtp
+*.pptx
 gpevo/FunctionFolder/spacegroup/random_cell_mol
+.~*                          # Office 锁/临时文件
 
 # Jupyter
 .ipynb_checkpoints/
