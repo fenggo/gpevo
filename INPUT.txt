@@ -71,10 +71,23 @@ C O N H
 mpirun -n 24 gulp< input > output
 uspexkit fixbroken --b=1.5 --s=1.2 --n=8 --data=data11_22
 mpirun -n 24 gulp< input > output
-uspexkit gp --n=24 --data=data11_22 --u=0.04
 % EndExecutable
 %%%%%%%%%%%%%%%%%%
 
 1      : numParallelCalcs
 0      : whichCluster
 0.0    : ExternalPressure (GPa)
+
+! GP 评估由此开关启用：=1 时在弛豫步骤后自动追加一步 GP。
+! 原来的 "uspexkit gp --n=24 --data=data11_22 --u=0.04" 命令行已删除，
+! 它排在第 4 位而 abinitioCode 只有 3 步，永远不会被调用。
+******************************************
+*      GAUSSIAN PROCESS (GP)             *
+******************************************
+1      : gp              ! 开关（0/1）
+24     : ncpu            ! GP 训练并行核数
+data   : data11_22       ! 训练数据目录
+den    : 1.8             ! 密度门：最优 GP 密度低于此值时跳过 EI/DFT/pred
+0.04   : u               ! 不确定度阈值（±1.96σ），超过才送 DFT
+1      : k               ! 每代 EI top-K 个数
+ei     : mode            ! ei | random | uncertainty
