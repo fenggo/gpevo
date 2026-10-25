@@ -40,15 +40,37 @@ def which_arm(how_come):
     return 0
 
 
+def _u(value, lo, hi):
+    """Map a physical value onto the unit interval, clamped."""
+    try:
+        u = (float(value) - lo) / (hi - lo)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.5
+    return min(1.0, max(0.0, u))
+
+
 def _fresh():
+    # Start from the amplitudes configured in INPUT.txt (createORG_EA), so
+    # `rotationAngleMax` / `translationMax` / `mutationRate` / `softStepScale`
+    # set both the value used when the bandit is off and the point the bandit
+    # starts exploring from.
+    ORG = G.get("ORG_STRUC")
+    if ORG is None:
+        angle, trans, mut, scale = ANGLE_HI, 0.5, 0.5, 1.0
+    else:
+        angle = float(getattr(ORG, "rotationAngleMax", ANGLE_HI) or ANGLE_HI)
+        trans = float(getattr(ORG, "translationMax", 0.5) or 0.5)
+        mut = float(getattr(ORG, "mutationRate", 0.5) or 0.5)
+        scale = float(getattr(ORG, "softStepScale", 1.0) or 1.0)
+
     inner = [
         [{"m": 0.5, "s": 0.25, "neff": 1.0} for _ in range(2)]
         for _ in range(K)
     ]
-    inner[3][0]["m"] = 1.0                      # rotationAngleMax = pi/2
-    inner[3][1]["m"] = (0.5 - TRANS_LO) / (TRANS_HI - TRANS_LO)
-    inner[4][0]["m"] = 0.5
-    inner[5][0]["m"] = 0.5
+    inner[3][0]["m"] = _u(angle, ANGLE_LO, ANGLE_HI)
+    inner[3][1]["m"] = _u(trans, TRANS_LO, TRANS_HI)
+    inner[4][0]["m"] = _u(mut, MUT_LO, MUT_HI)
+    inner[5][0]["m"] = _u(math.log(max(scale, 1e-12)), LOG_SCALE_LO, LOG_SCALE_HI)
     return {
         "alpha": np.ones(K, dtype=float),
         "beta": np.ones(K, dtype=float),

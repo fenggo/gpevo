@@ -100,6 +100,31 @@ ei     : mode        # ei | random | uncertainty
 - 这是 PSO **思想**（向最优个体靠拢 + 随机步长）在分子晶体上的实现，**不是** uspex-gp 那个 PSO 模块的移植：后者是逐原子随机放置 + 原子软模位移，不支持分子。
 - swarm 结构是**额外**加在 `populationSize` 之上的（与精英保留追加的结构同理），不会挤占现有算子的配额；未设 `fracSwarm` 时计数为 0，行为与之前完全一致。
 
+## 强化学习算子/参数优化（可选）
+
+`RL_strategy ≥ 1` 开启一个分层 contextual bandit：外层学 6 个算子的配额，内层对 Rotation / LatMutate / softmutate 三个算子的**连续变异幅度**做 Thompson 采样。状态存 `rl_agent_state.pkl`，可跨任务导出的先验放在 `RLPriors/`。
+
+```
+2      : RL_strategy    ! 0=关；>=1 开启 bandit
+0.9    : RL_forget      ! 遗忘因子 λ（历史统计衰减）
+1.0    : RL_w1          ! 奖励权重：入选精英集
+0.5    : RL_w2          ! 奖励权重：焓相对增益
+0.6    : RL_armCap      ! 单个算子占比上限
+1.0    : RL_kappa       ! 内层探索系数，越大幅度探索越激进
+1      : RL_autoExport  ! 导出跨任务先验
+```
+
+内层学的四个连续参数，也都有 INPUT 入口（`RL_strategy=0` 时**直接固定为你设的值**；开启 RL 时作为**学习起点**）：
+
+```
+45     : rotationAngleMax   ! 旋转变异角度上限，**单位度**（内部转弧度）
+0.3    : translationMax     ! 旋转后的刚体平移上限
+0.15   : mutationRate       ! LatMutation 的应变率
+1.5    : softStepScale      ! softmutate 步长缩放
+```
+
+RL 开启时的搜索范围固定为：角度 15°–90°、平移 0.1–0.8、应变 0.05–0.30、步长缩放 0.5–2.0（超出的设置值会被夹到区间端点）。
+
 ## 目录结构
 
 ```
@@ -114,6 +139,7 @@ gpevo/                        # Python 包
   runtime.py  inputparser.py  log_utils.py  matrix.py  importers.py
 gpevo.py                      # 免安装入口（仓库根目录运行）
 compare_runs.py  plot_dft.py  # 结果绘图工具
+sg_coverage.py                # 空间群覆盖度统计
 ei_select.py  clean.py        # EI 日志 / 清理脚本
 example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 ```

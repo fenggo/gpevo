@@ -66,6 +66,16 @@ def createORG_EA(inputFile):
     ORG.swarmStep = _flo(p.option("swarmStep"), ORG.swarmStep)
     ORG.swarmAngle = _flo(p.option("swarmAngle"), ORG.swarmAngle)
 
+    # Continuous mutation amplitudes.  They are fixed when the RL bandit is
+    # off and become the *starting point* of the RL inner parameters when it
+    # is on (RL_agent._fresh maps them onto the unit interval).  The angle is
+    # written in degrees; ORG.rotationAngleMax itself is radians.
+    raw = p.option("rotationAngleMax")
+    if raw is not None and raw != "":
+        ORG.rotationAngleMax = math.radians(float(raw))
+    ORG.translationMax = _flo(p.option("translationMax"), ORG.translationMax)
+    ORG.softStepScale = _flo(p.option("softStepScale"), ORG.softStepScale)
+
     raw = p.scalar("softMutTill")
     ORG.softMutTill = int(float(raw)) if raw is not None else ORG.numGenerations
     ORG.softMutOnly = [0] * (ORG.numGenerations + 1)
