@@ -113,9 +113,12 @@ def EA_310():
         # Variation operators are invoked in the same order and with the same
         # counts as the MATLAB EA_310.
         operations = ["Heredity_310", "Random_310", "Permutation_310", "Rotation_310",
-                      "LatMutation_310", "SoftModeMutation_310"]
+                      "LatMutation_310", "SoftModeMutation_310", "SwarmMutation_310"]
         counts = [ORG.howManyOffsprings, ORG.howManyRand, ORG.howManyPermutations,
-                  ORG.howManyRotations, ORG.howManyMutations, ORG.howManyAtomMutations]
+                  ORG.howManyRotations, ORG.howManyMutations, ORG.howManyAtomMutations,
+                  # additional to populationSize (like the elitist additions);
+                  # 0 unless `fracSwarm` is set in INPUT.txt
+                  int(getattr(ORG, "howManySwarm", 0) or 0)]
         count = 0
         for i in range(len(operations)):
             for j in range(max(0, int(counts[i]))):

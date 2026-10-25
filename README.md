@@ -9,7 +9,7 @@
 
 ## 功能
 
-- **分子晶体进化搜索（310）**：heredity / random / softmutation / permutation / latmutation / rotmutation 全部遗传算子 + 精英保留，与 MATLAB 版同一套流程。
+- **分子晶体进化搜索（310）**：heredity / random / softmutation / permutation / latmutation / rotmutation 全部遗传算子 + 精英保留，与 MATLAB 版同一套流程；另含一个可选的 **swarm 算子**（分子感知刚体移动，见下）。
 - **GP 主动学习**：每个结构经 `uspexkit.gp()` 预测密度/能量与不确定度；`CalcFitness` 阶段按 EI（或不确定度/随机）选 top-K 送 DFT，结果追加进训练集后重训、重预测，再回写适应度。
 - **对称性与随机结构生成**：230 个空间群的 Wyckoff 展开，`random_cell_mol` 的 Cython 移植（`pip install .` 时自动编译）。
 - **集群提交**：本地子进程与远程调度器两条路径，MPI 环境变量自动处理。
@@ -82,6 +82,23 @@ ei     : mode        # ei | random | uncertainty
 流程：GULP 弛豫 → `uspexkit.gp()` 预测（进程内调用其 Python API，不走命令行）→ `CalcFitness` 里 EI top-K 筛选 → DFT → 追加训练集 → 重训 → 重预测 → 回写适应度。第一代结束后自动画 `results*/gp_gen1.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
 
 > GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），以进程内 API 方式调用；改内核需重装 uspexkit。
+
+## 可选的 swarm 算子（分子感知刚体移动）
+
+`INPUT.txt` 中加一行即可启用，默认关闭（不写就完全不改变现有算子配比）：
+
+```
+0.1   : fracSwarm    # 每代额外产生的 swarm 结构数 = round(populationSize × 该值)
+0.5   : swarmStep    # 分子向最优结构对应分子移动的位移比例上限（0~1）
+30    : swarmAngle   # 移动后附加的刚体随机转动角度上限（度）
+```
+
+它把每个**分子整体**当作一个刚体，向当代最优结构中对应分子的位置移动一个随机比例的位移，再叠加一个随机刚体转动——`MOLCOORS` 只做刚体变换，分子内几何**逐位不变**，因此不像原子级软模位移那样会把分子撕开。位移会做最小镜像折叠，晶胞本身不变（交给后续弛豫）。
+
+两点说明：
+
+- 这是 PSO **思想**（向最优个体靠拢 + 随机步长）在分子晶体上的实现，**不是** uspex-gp 那个 PSO 模块的移植：后者是逐原子随机放置 + 原子软模位移，不支持分子。
+- swarm 结构是**额外**加在 `populationSize` 之上的（与精英保留追加的结构同理），不会挤占现有算子的配额；未设 `fracSwarm` 时计数为 0，行为与之前完全一致。
 
 ## 目录结构
 

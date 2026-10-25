@@ -59,6 +59,13 @@ def createORG_EA(inputFile):
     ORG.howManyMut = _flo(p.scalar("mutationDegree"), ORG.howManyMut)
     ORG.mutationRate = _flo(p.scalar("mutationRate"), ORG.mutationRate)
 
+    # Rigid-body swarm move.  `p.option` accepts both "0.1 : fracSwarm" and
+    # "fracSwarm : 0.1"; all three default to the values set by
+    # createORGDefault, i.e. disabled.
+    ORG.fracSwarm = _flo(p.option("fracSwarm"), ORG.fracSwarm)
+    ORG.swarmStep = _flo(p.option("swarmStep"), ORG.swarmStep)
+    ORG.swarmAngle = _flo(p.option("swarmAngle"), ORG.swarmAngle)
+
     raw = p.scalar("softMutTill")
     ORG.softMutTill = int(float(raw)) if raw is not None else ORG.numGenerations
     ORG.softMutOnly = [0] * (ORG.numGenerations + 1)
@@ -121,4 +128,7 @@ def createORG_EA(inputFile):
     ORG.howManyMutations = how_mut
     ORG.howManyAtomMutations = how_atom
     ORG.howManyTrans = how_trans
+    # Swarm offspring are additional: they are not part of the `total` split
+    # above, so enabling fracSwarm never changes the existing counts.
+    ORG.howManySwarm = int(round(N * max(0.0, float(ORG.fracSwarm or 0.0))))
     G["ORG_STRUC"] = ORG

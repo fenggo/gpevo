@@ -96,6 +96,13 @@ def createORGDefault():
     ORG.RL_autoExport = 1
     ORG.rotationAngleMax = math.pi / 2
     ORG.translationMax = 0.5
+    # Rigid-body swarm move (`fracSwarm : ...`): 0 disables it, so the default
+    # operator mix is unchanged.  Its offspring are produced *in addition* to
+    # populationSize, like the elitist additions.
+    ORG.fracSwarm = 0.0
+    ORG.howManySwarm = 0
+    ORG.swarmStep = 0.5          # fraction of the displacement toward the best
+    ORG.swarmAngle = 30.0        # max rigid rotation, degrees
     ORG.softStepScale = 1.0
     ORG.fracGene = 0.5
     ORG.fracRand = 0.2
