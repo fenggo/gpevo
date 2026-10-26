@@ -21,6 +21,26 @@ def Reading(code, ind_no, indic):
     try:
         s = POP.POPULATION[ind_no]
         step = int(s.Step)
+
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import is_gp_step
+
+        if is_gp_step(ORG, step):
+            # The appended GP step only predicts: submitJob has already run
+            # uspexkit.gp() and stored its metrics on the structure.  What it
+            # leaves behind in `output` is a one-line
+            # "Cycle: 0 Energy: <prediction>" summary, not a GULP relaxation
+            # log, so Read_GULP would mark a perfectly good structure as
+            # failed.  Nothing here to read -- just carry the relaxed
+            # enthalpy over to this slot so the table keeps a physical value
+            # (the GP prediction itself has its own columns).
+            enthalpies = np.asarray(s.Enthalpies, dtype=float).copy()
+            previous = enthalpies[step - 2] if step >= 2 else 100000.0
+            enthalpies[step - 1] = previous
+            s.Enthalpies = enthalpies
+            POP.POPULATION[ind_no].Step = step + 1
+            G["POP_STRUC"] = POP
+            return 0
+
         good_bad = Read_AbinitCode(code, 0)
         if good_bad == 1:
             coords, lattice = Read_GULP_Structure()
