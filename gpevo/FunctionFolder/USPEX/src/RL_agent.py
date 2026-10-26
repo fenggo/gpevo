@@ -60,7 +60,7 @@ def _fresh():
     else:
         angle = float(getattr(ORG, "rotationAngleMax", ANGLE_HI) or ANGLE_HI)
         trans = float(getattr(ORG, "translationMax", 0.5) or 0.5)
-        mut = float(getattr(ORG, "mutationRate", 0.5) or 0.5)
+        mut = float(getattr(ORG, "mutationRate", 0.08) or 0.08)
         scale = float(getattr(ORG, "softStepScale", 1.0) or 1.0)
 
     inner = [

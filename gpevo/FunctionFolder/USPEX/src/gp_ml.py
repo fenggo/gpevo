@@ -387,7 +387,7 @@ def gp_active_learning(ORG, POP, fitness):
 
     # Step 4: DFT on the selected crystals
     console_print(f"  Running: uspexkit.calc(ids='{crystal_ids}')")
-    if not _call("calc", cwd=res_folder, t="Individuals.traj", den=1.88,
+    if not _call("calc", cwd=res_folder, t="Individuals.traj", den=params["den"],
                  ids=crystal_ids, step=500, ncpu=int(params["ncpu"]),
                  dat=params["dat"], tolerance=0.01)[0]:
         return fitness

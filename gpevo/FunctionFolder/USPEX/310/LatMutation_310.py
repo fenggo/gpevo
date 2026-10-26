@@ -13,13 +13,18 @@ from gpevo.log_utils import console_print
 def LatMutation_310(count):
     _ = count
     POP = G["POP_STRUC"]
+    # Strain scale from ``mutationRate`` (README: LatMutation 的应变率).
+    # The diagonal/shear model below multiplies every matrix entry by this
+    # ``scale``, so ``mutationRate`` is the half-width of the uniform strain
+    # (0.04 on either side), matching the previous hard-coded 0.08 default.
+    strain_scale = float(getattr(G["ORG_STRUC"], "mutationRate", 0.08) or 0.08)
     for _ in range(50):
         idx = pick_parent()
         if idx is None or idx >= len(POP.POPULATION):
             continue
         child = copy_individual(POP.POPULATION[idx])
         lat = np.asarray(child.LATTICE, dtype=float).reshape(3, 3)
-        strain = np.eye(3) + (np.random.rand(3, 3) - 0.5) * 0.08
+        strain = np.eye(3) + (np.random.rand(3, 3) - 0.5) * strain_scale
         child.LATTICE = strain @ lat
         if not valid_molecules(child, 0):
             continue

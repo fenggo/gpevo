@@ -36,7 +36,7 @@ def createORGDefault():
     ORG.minDiagAngle = 30
     ORG.bestFrac = 0.7
     ORG.alpha = -1
-    ORG.mutationRate = 0.5
+    ORG.mutationRate = 0.08
     ORG.numGenerations = 100
     ORG.percSliceShift = 1.0
     ORG.dynamicalBestHM = 2
