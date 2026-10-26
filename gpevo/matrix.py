@@ -66,6 +66,18 @@ def latConverter(lat):
     A 3x3 lattice is converted to [a b c alpha beta gamma] (angles in
     radians). A 6-parameter lattice is converted to a 3x3 Cartesian matrix;
     angles are assumed to be in radians, matching the MATLAB implementation.
+
+    The convention throughout gpevo is that the rows of the 3x3 matrix are
+    the lattice vectors: ``latConverter`` reads them off the rows, and
+    ``Frac2Cart``/``Cart2Frac`` multiply on the right (``frac @ M``,
+    ``cart @ inv(M)``).  The 6-parameter branch must therefore build a
+    matrix whose ROWS are a, b, c -- the lower-triangular form of
+    latConverter.m.  Building the transpose instead (the previous
+    behaviour) leaves the vectors in the columns, so every non-orthogonal
+    cell came out as a different lattice: it does not even round-trip
+    through ``latConverter``, and the symmetry operations of the generated
+    space group are then not isometries of it, which shears rigid
+    molecules into distorted copies.
     """
     arr = np.asarray(lat, dtype=float)
     if arr.ndim == 2 and arr.shape[0] == 3 and arr.shape[1] == 3:
@@ -82,13 +94,15 @@ def latConverter(lat):
         return output
 
     a, b, c, alpha, beta, gamma = arr.reshape(-1)[:6]
-    v = math.sqrt(1 - math.cos(alpha)**2 - math.cos(beta)**2 - math.cos(gamma)**2
-                  + 2*math.cos(alpha)*math.cos(beta)*math.cos(gamma))
-    M = np.array([
-        [a, b*math.cos(gamma), c*math.cos(beta)],
-        [0, b*math.sin(gamma), c*(math.cos(alpha)-math.cos(beta)*math.cos(gamma))/math.sin(gamma)],
-        [0, 0, c*v/math.sin(gamma)]
-    ], dtype=float)
+    cos_a, cos_b, cos_g = math.cos(alpha), math.cos(beta), math.cos(gamma)
+    M = np.zeros((3, 3), dtype=float)
+    M[0, 0] = a
+    M[1, 0] = b * cos_g
+    M[1, 1] = b * math.sin(gamma)
+    M[2, 0] = c * cos_b
+    M[2, 1] = (c * cos_a * math.sin(gamma)
+               - (c * cos_b - c * cos_a * cos_g) / math.tan(gamma))
+    M[2, 2] = math.sqrt(max(0.0, c * c - M[2, 0] ** 2 - M[2, 1] ** 2))
     return M
 
 
