@@ -49,21 +49,19 @@ def read_molecules():
         console_print("The program is STOPS here........")
         raise RuntimeError("Missing MOL_* files required for calculationType 310")
 
-    n_mols = len(files)
-    given = list(ORG.numMols)
+    n_files = len(files)
     if not ORG.numMols:
-        ORG.numMols = [1] * n_mols
-    if len(ORG.numMols) < n_mols:
-        ORG.numMols = ORG.numMols + [1] * (n_mols - len(ORG.numMols))
-    elif len(ORG.numMols) > n_mols:
-        ORG.numMols = ORG.numMols[:n_mols]
-    if list(ORG.numMols) != given:
-        # numSpecies has one entry per molecule type; writing fewer (or more)
-        # than there are MOL_x files silently changed the composition, which
-        # is easy to miss -- say what is being built instead.
-        console_print(f"  Warning: numSpecies {given} does not match the "
-                      f"{n_mols} MOL_x files; using numMols={ORG.numMols}")
-        console_print(f"           (molecules per cell of MOL_1..MOL_{n_mols})")
+        ORG.numMols = [1] * n_files
+    elif len(ORG.numMols) > n_files:
+        console_print(f"  Warning: numSpecies has {len(ORG.numMols)} entries "
+                      f"but only {n_files} MOL_x files; using the first "
+                      f"{n_files} molecule types")
+        ORG.numMols = ORG.numMols[:n_files]
+    # numSpecies gives one entry per molecule type, so only MOL_1..MOL_N are
+    # read -- extra MOL_x files in the run directory are simply not part of the
+    # system (read_molecules.m loops over numMols the same way).  A single
+    # entry therefore means a single-component cell, not "plus the others".
+    files = files[:len(ORG.numMols)]
 
     stdmol = []
     for idx, path in enumerate(files):
@@ -174,10 +172,18 @@ def read_molecules():
     p = InputParser(os.path.join(home, "INPUT.txt"))
     block = p.block("MolCenters", "EndMol")
     if block:
-        vals = [scannum(line) for line in block if scannum(line) is not None]
-        if len(vals) == n:
+        # Each line is one row of the n x n centre-distance matrix.  scannum
+        # collapses a single number to a scalar, so normalise to a row first:
+        # a one-molecule-type run writes MolCenters as a single value.
+        rows = []
+        for line in block:
+            value = scannum(line)
+            if value is None:
+                continue
+            rows.append(list(value) if isinstance(value, (list, tuple)) else [value])
+        if len(rows) == n and all(len(row) >= n for row in rows):
             for i in range(n):
-                row = vals[i]
+                row = rows[i]
                 for j in range(i, n):
                     cm[i, j] = cm[j, i] = float(row[j])
             ORG.CenterminDistMatrice = cm
