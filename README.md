@@ -95,17 +95,21 @@ python compare_runs.py --dirs tnt/results2 uspex-gp/results1 --labels gpevo octa
 
 ## GP 主动学习（INPUT.txt 选项）
 
-在 `INPUT.txt` 中加下面几行即可开启（`value : keyword` 与 `keyword : value` 两种顺序都认）：
+在 `INPUT.txt` 中加下面几行即可开启。推荐统一用 `value : keyword`（USPEX 的规范写法），
+`keyword : value` 也认；注释用 `%`、`!` 或 `#` 都可以：
 
 ```
-1      : gp          # 开关：1=启用，弛豫后追加一步 GP 评估
-24     : ncpu        # GP 训练并行核数；不写则取 % numProcessors 最后一项，再缺省 8
-data   : data11_22   # 训练数据目录（需含 feature_mlp.csv / feature.csv / structures.traj）
-den    : 1.8         # 密度门：gp() 的 --den，同时是 CalcFitness EI 门的密度下限
-0.04   : u           # 不确定度阈值（±1.96σ），超过才送 DFT
-2      : k           # 每代 EI top-K 个数
-ei     : mode        # ei | random | uncertainty
+1         : gp            % 开关：1=启用，弛豫后追加一步 GP 评估
+24        : ncpu          % GP 训练并行核数；不写则取 % numProcessors 最后一项，再缺省 8
+data11_22 : data          % 训练数据目录（需含 feature_mlp.csv / feature.csv / structures.traj）
+1.8       : den           % 密度门：gp() 的 --den，同时是 CalcFitness EI 门的密度下限
+0.04      : u             % 不确定度阈值（±1.96σ），超过才送 DFT
+2         : k             % 每代 EI top-K 个数
+ei        : mode          % ei | random | uncertainty
 ```
+
+> 若 `gp` 一行因写法问题没被读入（例如关键字被注释污染），开关会**静默**保持 0——
+> 整条 GP 链都不发生。启动时会打印告警列出有问题的行，GP 数据目录缺失或不含上述三个文件时也会告警。
 
 流程：GULP 弛豫 → `uspexkit.gp()` 预测（进程内调用其 Python API，不走命令行）→ `CalcFitness` 里 EI top-K 筛选 → DFT → 追加训练集 → 重训 → 重预测 → 回写适应度。第一代结束后自动画 `results*/gp_gen1.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
 
@@ -116,9 +120,9 @@ ei     : mode        # ei | random | uncertainty
 `INPUT.txt` 中加一行即可启用，默认关闭（不写就完全不改变现有算子配比）：
 
 ```
-0.1   : fracSwarm    # 每代额外产生的 swarm 结构数 = round(populationSize × 该值)
-0.5   : swarmStep    # 分子向最优结构对应分子移动的位移比例上限（0~1）
-30    : swarmAngle   # 移动后附加的刚体随机转动角度上限（度）
+0.1   : fracSwarm    % 每代额外产生的 swarm 结构数 = round(populationSize × 该值)
+0.5   : swarmStep    % 分子向最优结构对应分子移动的位移比例上限（0~1）
+30    : swarmAngle   % 移动后附加的刚体随机转动角度上限（度）
 ```
 
 它把每个**分子整体**当作一个刚体，向当代最优结构中对应分子的位置移动一个随机比例的位移，再叠加一个随机刚体转动——`MOLCOORS` 只做刚体变换，分子内几何**逐位不变**，因此不像原子级软模位移那样会把分子撕开。位移会做最小镜像折叠，晶胞本身不变（交给后续弛豫）。
@@ -133,22 +137,22 @@ ei     : mode        # ei | random | uncertainty
 `RL_strategy ≥ 1` 开启一个分层 contextual bandit：外层学 6 个算子的配额，内层对 Rotation / LatMutate / softmutate 三个算子的**连续变异幅度**做 Thompson 采样。状态存 `rl_agent_state.pkl`，可跨任务导出的先验放在 `RLPriors/`。
 
 ```
-2      : RL_strategy    ! 0=关；>=1 开启 bandit
-0.9    : RL_forget      ! 遗忘因子 λ（历史统计衰减）
-1.0    : RL_w1          ! 奖励权重：入选精英集
-0.5    : RL_w2          ! 奖励权重：焓相对增益
-0.6    : RL_armCap      ! 单个算子占比上限
-1.0    : RL_kappa       ! 内层探索系数，越大幅度探索越激进
-1      : RL_autoExport  ! 导出跨任务先验
+2      : RL_strategy    % 0=关；>=1 开启 bandit
+0.9    : RL_forget      % 遗忘因子 λ（历史统计衰减）
+1.0    : RL_w1          % 奖励权重：入选精英集
+0.5    : RL_w2          % 奖励权重：焓相对增益
+0.6    : RL_armCap      % 单个算子占比上限
+1.0    : RL_kappa       % 内层探索系数，越大幅度探索越激进
+1      : RL_autoExport  % 导出跨任务先验
 ```
 
 内层学的四个连续参数，也都有 INPUT 入口（`RL_strategy=0` 时**直接固定为你设的值**；开启 RL 时作为**学习起点**）：
 
 ```
-45     : rotationAngleMax   ! 旋转变异角度上限，**单位度**（内部转弧度）
-0.3    : translationMax     ! 旋转后的刚体平移上限
-0.15   : mutationRate       ! LatMutation 的应变率
-1.5    : softStepScale      ! softmutate 步长缩放
+45     : rotationAngleMax   % 旋转变异角度上限，**单位度**（内部转弧度）
+0.3    : translationMax     % 旋转后的刚体平移上限
+0.15   : mutationRate       % LatMutation 的应变率
+1.5    : softStepScale      % softmutate 步长缩放
 ```
 
 RL 开启时的搜索范围固定为：角度 15°–90°、平移 0.1–0.8、应变 0.05–0.30、步长缩放 0.5–2.0（超出的设置值会被夹到区间端点）。
