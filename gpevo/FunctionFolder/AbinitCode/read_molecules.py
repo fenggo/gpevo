@@ -50,12 +50,20 @@ def read_molecules():
         raise RuntimeError("Missing MOL_* files required for calculationType 310")
 
     n_mols = len(files)
+    given = list(ORG.numMols)
     if not ORG.numMols:
         ORG.numMols = [1] * n_mols
     if len(ORG.numMols) < n_mols:
         ORG.numMols = ORG.numMols + [1] * (n_mols - len(ORG.numMols))
     elif len(ORG.numMols) > n_mols:
         ORG.numMols = ORG.numMols[:n_mols]
+    if list(ORG.numMols) != given:
+        # numSpecies has one entry per molecule type; writing fewer (or more)
+        # than there are MOL_x files silently changed the composition, which
+        # is easy to miss -- say what is being built instead.
+        console_print(f"  Warning: numSpecies {given} does not match the "
+                      f"{n_mols} MOL_x files; using numMols={ORG.numMols}")
+        console_print(f"           (molecules per cell of MOL_1..MOL_{n_mols})")
 
     stdmol = []
     for idx, path in enumerate(files):

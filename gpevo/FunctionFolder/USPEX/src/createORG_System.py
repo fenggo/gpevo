@@ -96,7 +96,11 @@ def createORG_System(inputFile):
 
     blocker = p.block("numSpeci", "EndNumSpeci")
     if blocker:
-        ORG.numIons = scannum(" ".join(blocker))
+        vals = scannum(" ".join(blocker))
+        # scannum collapses a single number to a scalar; numIons is always a
+        # per-species list, and a one-molecule-type run (e.g. "8") must not
+        # become the bare int that breaks every `for x in ORG.numIons`.
+        ORG.numIons = list(vals) if isinstance(vals, (list, tuple)) else [vals]
     else:
         ORG.numIons = [1]
 
