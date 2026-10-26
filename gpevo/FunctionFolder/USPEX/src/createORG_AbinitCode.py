@@ -1,8 +1,13 @@
 """Python equivalent of createORG_AbinitCode.m (310-relevant subset)."""
 from __future__ import annotations
 
+import os
+
 from gpevo.runtime import G
-from gpevo.inputparser import InputParser, scannum
+from gpevo.inputparser import InputParser, scannum, strip_comment
+
+# Options of the GP block; `gp` is the switch, the rest only matter when it is on.
+_GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode")
 
 
 def _nonempty_block(lines):
@@ -18,6 +23,50 @@ def _nonempty_block(lines):
         if s:
             out.append(s)
     return out
+
+
+def _gp_option_lines(p):
+    """INPUT.txt lines that look like GP options, comment characters included.
+
+    The raw text is kept so the warning shows exactly what was written; the
+    scan is on the first token of either side of the colon, which is also how
+    ``InputParser.option`` matches, so a line it lists is one it can read.
+    """
+    found = []
+    for raw in p.lines:
+        line = strip_comment(raw).strip()
+        if ":" not in line:
+            continue
+        left, right = line.split(":", 1)
+        for side in (right, left):
+            tokens = side.split()
+            if tokens and tokens[0].lower() in _GP_OPTIONS:
+                found.append(line)
+                break
+    return found
+
+
+# uspexkit.gp() reads these from ../<data> relative to a CalcFold directory.
+_GP_DATA_FILES = ("feature_mlp.csv", "feature.csv", "structures.traj")
+
+
+def _check_gp_data(ORG):
+    """Report a missing or incomplete GP training directory (uspexkit.gp)."""
+    from gpevo.log_utils import console_print
+
+    home = getattr(ORG, "homePath", None) or "."
+    data_dir = os.path.join(home, str(getattr(ORG, "gpData", "data") or "data"))
+    if not os.path.isdir(data_dir):
+        console_print(f"  Warning: GP data directory '{data_dir}' does not "
+                      "exist; uspexkit.gp() cannot train.")
+        console_print(f"           expected files: {', '.join(_GP_DATA_FILES)}")
+        return
+    missing = [name for name in _GP_DATA_FILES
+               if not os.path.isfile(os.path.join(data_dir, name))]
+    if missing:
+        console_print(f"  Warning: GP data directory '{data_dir}' is missing "
+                      f"{', '.join(missing)};")
+        console_print("           uspexkit.gp() cannot train without them.")
 
 
 def createORG_AbinitCode(inputFile):
@@ -136,5 +185,19 @@ def createORG_AbinitCode(inputFile):
             ORG.Kresol.append(ORG.Kresol[-1])
         if ORG.numProcessors:
             ORG.numProcessors.append(ORG.numProcessors[-1])
+        _check_gp_data(ORG)
+    elif _gp_option_lines(p):
+        # GP options are present but the switch did not turn on.  Without this
+        # the whole GP block silently does nothing -- no gp.csv, no GP columns
+        # in OUTPUT.txt, no active learning -- which is easy to miss.
+        from gpevo.log_utils import console_print
+
+        console_print("  Warning: INPUT.txt contains GP options but 'gp' is "
+                      "0 or unreadable;")
+        console_print("           the GP step, its predictions and the GP "
+                      "columns of OUTPUT.txt are disabled.")
+        console_print("           offending lines:")
+        for line in _gp_option_lines(p):
+            console_print(f"             {line}")
 
     G["ORG_STRUC"] = ORG
