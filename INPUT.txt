@@ -37,6 +37,9 @@ C O N H
 10    :  RmaxFing  
 0.04  :  deltaFing 
 0.015 :  sigmaFing 
+0.5   : antiSeedsMax         % 反种子惩罚强度；0（默认）=关闭整个 AntiSeed
+0.02  : antiSeedsSigma       % 惩罚宽度=该值×最优区结构指纹的平均余弦距离
+3     : antiSeedsActivation  % |值|：>0 从该代起把全种群加为反种子，<0 只加最优结构
 
 
 % IonDistances

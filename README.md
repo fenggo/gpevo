@@ -169,6 +169,44 @@ ei        : mode          % ei | random | uncertainty
 - 这是 PSO **思想**（向最优个体靠拢 + 随机步长）在分子晶体上的实现，**不是** uspex-gp 那个 PSO 模块的移植：后者是逐原子随机放置 + 原子软模位移，不支持分子。
 - swarm 结构是**额外**加在 `populationSize` 之上的（与精英保留追加的结构同理），不会挤占现有算子的配额；未设 `fracSwarm` 时计数为 0，行为与之前完全一致。
 
+### AntiSeeds 反种子（可选）
+
+把**已经过度采样**的结构指纹区域设为排斥源：与反种子指纹越像的结构，适应度被抬得越高（越不容易被选中做父代），从而把搜索面推开。对应 `uspex-gp` 的 `pickAntiSeeds.m` + `AntiSeedsCorrection.m`，在 `CalcFitness_310` 之后、`FitnessRankingCorrection` 之前生效。
+
+**用法**：把不希望再采到的结构（若干个 POSCAR 顺次拼接）放进 `<homePath>/AntiSeeds/POSCARS`，启动时（新跑和重启都会）读入并算出各自指纹作为排斥源。
+
+```
+0.5   : antiSeedsMax         % 惩罚强度系数；0（默认）表示整个 AntiSeed 关闭
+0.02  : antiSeedsSigma       % 惩罚宽度系数
+3     : antiSeedsActivation  % |值|：>0 从该代起把全种群都加为反种子，<0 只加最优结构
+```
+
+惩罚公式（`AntiSeedsCorrection.m:57`）：每个种群成员的适应度加上
+
+```
+Δ = Max · exp( −cos_dist² / (2·Sigma²) )
+```
+
+其中 `cos_dist` 是该结构与反种子指纹的余弦距离：完全一样（距离 0）吃到满额 `Max`，差异越大衰减越快。
+
+- `Max` 每代自适应：**当前值 = `antiSeedsMax` ×（最优 `bestFrac` 部分适应度的均值 − 最小值）**，即随适应度展宽而涨；`generation > antiSeedsActivation + 1` 后还有一半衰减保底，不会掉得比 `0.5×上一代` 更快。
+- `Sigma` 每代自适应：**当前值 = `antiSeedsSigma` × 最优区结构两两指纹的平均余弦距离**，第 1 代用它统一标定所有预置反种子。
+- 到达 `antiSeedsActivation` 后开始自学习：`>0` 追加全部种群指纹，`<0` 只追加当代最优那一个——这样搜索会自动避开已经挤在一起的区域。
+- 状态存在 `<homePath>/Current_ANTISEEDS.pkl`（与 `Current_ORG/POP.pkl` 同族），重启时优先加载而不是重读 POSCARS；`gpevo clean` 会把它清掉。
+
+**调参提示**：`antiSeedsSigma` 直接决定排斥范围，`Sigma ≈ antiSeedsSigma × 最优区平均指纹距离`。实测一组 TNT 类结构（到反种子的余弦距离依次 0.00 / 0.33 / 0.46）在 `antiSeedsMax=2` 下抬高量：
+
+| `antiSeedsSigma` | 完全一样 | 比较像(0.33) | 很不一样(0.46) |
+|---|---|---|---|
+| 0.001（默认） | 1.000 | 0.000 | 0.000 |
+| 0.02 | 1.000 | 0.000 | 0.000 |
+| **0.5** | 1.011 | 0.143 | 0.036 |
+| 1.0 | 1.327 | 0.903 | 0.729 |
+
+默认的 `0.001`（以及 0.02 这种小值）实际是"**只排开几乎重复的结构**"，想让 replusion 有梯度、把比较像的结构一起推开，建议取 **0.3~1.0**（约 0.5 时区分度最好）；再大就变成全局都罚了。`antiSeedsMax` 控制抬高多少，`0`（默认）整个功能关闭。
+
+> 与 MATLAB 的一处已知差异：参考实现给反种子算指纹时**不做分子内过滤**，而 gpevo 里分子体系（`molecule=1`，即 310 场景）的种群指纹会过滤掉分子内原子对。为保持一致，`pickAntiSeeds` 目前也按参考实现走（不过滤）；若发现距离被系统性抬高、惩罚偏弱，可在这条路径上补 `intra_map`。
+
 ### 强化学习算子/参数优化（可选）
 
 `RL_strategy ≥ 1` 开启一个分层 contextual bandit：外层学 6 个算子的配额，内层对 Rotation / LatMutate / softmutate 三个算子的**连续变异幅度**做 Thompson 采样。状态存 `rl_agent_state.pkl`，可跨任务导出的先验放在 `RLPriors/`。

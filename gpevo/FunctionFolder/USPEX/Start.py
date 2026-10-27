@@ -64,6 +64,18 @@ def Start():
                     compute_structure_metrics(_s, ORG)
                 except Exception:
                     pass
+        from gpevo.FunctionFolder.USPEX.src.pickAntiSeeds import (
+            ANTISEEDS_FILE,
+            pickAntiSeeds,
+        )
+
+        if os.path.exists(ANTISEEDS_FILE):
+            try:
+                G["ANTISEEDS"] = safeload(ANTISEEDS_FILE)
+            except Exception:
+                pickAntiSeeds()
+        else:
+            pickAntiSeeds()
         # Work in result folder (matches POP structure)
         if POP.resFolder and os.path.exists(POP.resFolder):
             os.makedirs(POP.resFolder, exist_ok=True)
@@ -74,6 +86,13 @@ def Start():
         CreateCalcFolder(1)
         Initialize()
         CreateCalcFolder()
+        # AntiSeedsCorrection.m only ever sees anti-seeds on a restart in the
+        # reference (Start.m:57 sits in the restart branch), but reading them
+        # here too makes a user-supplied AntiSeeds/POSCARS work for a fresh run.
+        if os.path.isfile(os.path.join(ORG.homePath, "AntiSeeds", "POSCARS")):
+            from gpevo.FunctionFolder.USPEX.src.pickAntiSeeds import pickAntiSeeds
+
+            pickAntiSeeds()
 
     for name in ("ORG_STRUC", "POP_STRUC"):
         if name not in G or G[name] is None:

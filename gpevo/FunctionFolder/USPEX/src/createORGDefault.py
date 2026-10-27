@@ -134,7 +134,6 @@ def createORGDefault():
     ORG.CenterminDistMatrice = []
     ORG.minDistMatrice = []
     ORG.goodBonds = None
-    ORG.antiseeds = []
     ORG.nsym = []
     ORG.resFolder = ""
     ORG.pickedUP = 0

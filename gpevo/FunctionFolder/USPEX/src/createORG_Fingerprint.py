@@ -39,6 +39,12 @@ def createORG_Fingerprint(inputFile):
     raw = p.scalar("antiSeedsMax")
     if raw is not None:
         ORG.antiSeedsMax = float(raw)
+    raw = p.scalar("antiSeedsSigma")
+    if raw is not None:
+        ORG.antiSeedsSigma = float(raw)
+    raw = p.scalar("antiSeedsActivation")
+    if raw is not None:
+        ORG.antiSeedsActivation = float(raw)
     # Weights are over atom types, not molecule types.  For molecular runs,
     # ``GetPOP_MOL`` reconstructs the per-atom-type counts that correspond to
     # the atom-type dimension of the full-atom fingerprint matrix.
