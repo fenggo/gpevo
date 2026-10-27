@@ -45,6 +45,9 @@ AlphaFold3
 看一下/home/feng/alphafold3代码,看看对gpevo-codebuddy包有借鉴的地方吗? 
 
 4. 加权聚类采样 — data/weighted_pdb_sampler.py:43-150
-  - AF3 的 (β/cluster_size)·(类型权重) 公式，把"链/界面聚类"换成"成分/formula 聚类"就能用在上 gpevo 的父代选择或 GP 训练集采样。gpevo 现在的 tournament 选择完全按
-  ranking，没有集群平衡。
+  - AF3 的 (β/cluster_size)·(类型权重) 公式，把"链/界面聚类"换成"成分/formula 聚类"就能用在上 gpevo 的父代选择或 GP 训练集采样。gpevo 现在的 tournament 选择完全按ranking，没有集群平衡。
+
+看一下/home/feng/mlff/magus代码,看看对gpevo-codebuddy包有借鉴的地方吗? 
+
+
 

@@ -1,7 +1,7 @@
 [build-system]
-# Cython extensions are built from setup.py; Cython must be present at build time
-# (setuptools>=64 can resolve the pyproject metadata + setup.py ext_modules).
-requires = ["setuptools>=64", "cython>=3.0", "numpy>=1.21"]
+# Cython extension (random_cell_mol_cy) is built from setup.py; Cython must be
+# present at build time (setuptools>=64 can resolve pyproject + setup.py).
+requires = ["setuptools>=64", "cython>=3.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -46,8 +46,6 @@ gpevo = [
     "FunctionFolder/sys/uspex_fast_core.pyx",
     "FunctionFolder/sys/*.so",
     # vendored uspexkit subset (gp/pred/calc/add)
-    "uspexkit/*.pyx",
-    "uspexkit/*.c",
     "uspexkit/LICENSE",
 ]
 

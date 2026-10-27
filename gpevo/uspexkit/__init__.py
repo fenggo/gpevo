@@ -55,9 +55,6 @@ def __getattr__(name):
     if name == "info":
         from .core import info as _info
         return _info
-    if name == "fingerprint":
-        from .core import fingerprint as _fingerprint
-        return _fingerprint
     if name == "lib":
         from .core import lib as _lib
         return _lib
