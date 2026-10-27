@@ -200,12 +200,26 @@ RL 开启时的搜索范围固定为：角度 15°–90°、平移 0.1–0.8、�
 # 多次运行的密度/能量分布对比（输出 compare_runs.png）
 python compare_runs.py --dirs tnt/results2 uspex-gp/results1 --labels gpevo octave
 
-# DFT 结果绘图 / 空间群覆盖度统计 / EI 日志 / 清理
+# DFT 结果绘图 / 空间群覆盖度统计 / EI 日志
 python plot_dft.py
 python sg_coverage.py
 python ei_select.py
-python clean.py
 ```
+
+## 命令行
+
+```bash
+gpevo               # 跑搜索（等价于 gpevo run，与旧行为一致）
+gpevo clean         # 清理运行目录
+gpevo clean -n      # 只列出会删什么，不动文件
+gpevo clean -a      # 连 results*/ 一起删
+gpevo clean -p DIR  # 清理别的目录（不是当前目录）
+gpevo clean -f      # 目录里没有 INPUT.txt / CalcFold 也照样清
+```
+
+`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings` 这些状态文件。
+
+永远不删：`Specific/`、`Seeds/`、`INPUT.txt`、`MOL_*`、`results*/`（除 `-a`）、GP 训练数据目录 `<data>/`。目录里既没有 `INPUT.txt` 也没有 `CalcFold*` 时会拒绝执行，确认无误再加 `-f`。
 
 ## 目录结构
 
@@ -217,12 +231,13 @@ gpevo/                        # Python 包
     Submission/               # 作业提交（本地子进程 / 集群调度器）
     spacegroup/               # 对称性分析 + random_cell_mol（Cython 移植）
     sys/  Tool/               # 系统工具函数
-  cli.py                      # 控制台入口
+  cli.py                      # 控制台入口（gpevo run / gpevo clean）
+  tools/                      # 子命令实现（clean.py）
   runtime.py  inputparser.py  log_utils.py  matrix.py  importers.py
 gpevo.py                      # 免安装入口（仓库根目录运行）
 compare_runs.py  plot_dft.py  # 结果绘图工具
 sg_coverage.py                # 空间群覆盖度统计
-ei_select.py  clean.py        # EI 日志 / 清理脚本
+ei_select.py                  # EI 日志
 example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 ```
 
