@@ -1,8 +1,7 @@
 [build-system]
-# setuptools>=74.1 is required for the [[tool.setuptools.ext-modules]]
-# table below (older releases ignore it and ship gpevo without the compiled
-# random_cell_mol_cy extension, silently falling back to the Fortran binary).
-requires = ["setuptools>=74.1", "cython>=3.0"]
+# Cython extensions are built from setup.py; Cython must be present at build time
+# (setuptools>=64 can resolve the pyproject metadata + setup.py ext_modules).
+requires = ["setuptools>=64", "cython>=3.0", "numpy>=1.21"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,6 +17,11 @@ dependencies = [
     "scipy>=1.7",
     "networkx>=2.6",
     "spglib>=2.0",
+    # uspexkit (vendored under gpevo.uspexkit) runtime deps
+    "scikit-learn>=1.0",
+    "ase>=3.22",
+    "irff",
+    "pymatgen",
 ]
 
 [project.optional-dependencies]
@@ -41,10 +45,12 @@ gpevo = [
     "FunctionFolder/spacegroup/data/*.txt",
     "FunctionFolder/sys/uspex_fast_core.pyx",
     "FunctionFolder/sys/*.so",
+    # vendored uspexkit subset (gp/pred/calc/add)
+    "uspexkit/*.pyx",
+    "uspexkit/*.c",
+    "uspexkit/LICENSE",
 ]
 
-# Cython port of the `random_cell_mol` Fortran binary.  Built by `pip install .`
-# (Cython comes from build-system.requires, so no manual `cythonize` step).
-[[tool.setuptools.ext-modules]]
-name = "gpevo.FunctionFolder.spacegroup.random_cell_mol_cy"
-sources = ["gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.pyx"]
+# Cython extensions are defined in setup.py (it resolves numpy's include path
+# at build time, which the static pyproject ext-modules table cannot).
+

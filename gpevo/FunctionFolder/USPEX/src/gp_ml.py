@@ -161,21 +161,19 @@ def _pick_by_fitness(entries, fitness, nboot):
     return order[:max(0, int(nboot))]
 
 def _uspexkit_func(name):
-    """Return the ``uspexkit.<name>`` callable, or None when unavailable."""
+    """Return the ``uspexkit.<name>`` callable from the vendored ``gpevo.uspexkit``.
+
+    Returns None when the package or the function is unavailable.  uspexkit is
+    bundled with GPEvo (``gpevo/uspexkit``), so there is no standalone fallback.
+    """
     try:
-        import uspexkit
+        from gpevo import uspexkit as _pkg
     except Exception as exc:
-        console_print(f"  Warning: uspexkit is not importable ({exc})")
+        console_print(f"  Warning: gpevo.uspexkit is not importable ({exc})")
         return None
-    func = getattr(uspexkit, name, None)
-    if func is None:                       # install without the top-level alias
-        try:
-            import uspexkit.core as _core
-            func = getattr(_core, name, None)
-        except Exception:
-            func = None
+    func = getattr(_pkg, name, None)
     if func is None:
-        console_print(f"  Warning: uspexkit.{name} is not available")
+        console_print(f"  Warning: gpevo.uspexkit.{name} is not available")
     return func
 
 
