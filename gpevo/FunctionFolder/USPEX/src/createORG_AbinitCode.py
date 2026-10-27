@@ -1,13 +1,19 @@
 """Python equivalent of createORG_AbinitCode.m (310-relevant subset)."""
 from __future__ import annotations
 
+import glob
 import os
+import shutil
 
 from gpevo.runtime import G
 from gpevo.inputparser import InputParser, scannum, strip_comment
 
+# Only needed for the training-set row count below; gp_ml imports nothing from
+# this module, so there is no import cycle.
+from gpevo.FunctionFolder.USPEX.src.gp_ml import csv_rows
+
 # Options of the GP block; `gp` is the switch, the rest only matter when it is on.
-_GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode")
+_GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot")
 
 
 def _nonempty_block(lines):
@@ -51,22 +57,59 @@ _GP_DATA_FILES = ("feature_mlp.csv", "feature.csv", "structures.traj")
 
 
 def _check_gp_data(ORG):
-    """Report a missing or incomplete GP training directory (uspexkit.gp)."""
+    """Report the state of the GP training directory (uspexkit.gp).
+
+    A missing or incomplete directory is no longer fatal: the best structures
+    of the first generation are labelled at its end to seed it (see
+    ``gp_ml.gp_active_learning``).  What still needs checking here is whether
+    that labelling can actually run.
+    """
     from gpevo.log_utils import console_print
 
     home = getattr(ORG, "homePath", None) or "."
     data_dir = os.path.join(home, str(getattr(ORG, "gpData", "data") or "data"))
     if not os.path.isdir(data_dir):
-        console_print(f"  Warning: GP data directory '{data_dir}' does not "
-                      "exist; uspexkit.gp() cannot train.")
-        console_print(f"           expected files: {', '.join(_GP_DATA_FILES)}")
+        console_print(f"  Note: GP data directory '{data_dir}' does not exist yet;")
+        console_print("        it is created automatically and seeded with the best "
+                      "structures of the first generation.")
+        _check_reference_run(ORG)
         return
     missing = [name for name in _GP_DATA_FILES
                if not os.path.isfile(os.path.join(data_dir, name))]
     if missing:
-        console_print(f"  Warning: GP data directory '{data_dir}' is missing "
+        console_print(f"  Note: GP data directory '{data_dir}' is missing "
                       f"{', '.join(missing)};")
-        console_print("           uspexkit.gp() cannot train without them.")
+        console_print("        missing files are written when the first labelled "
+                      "structures are added.")
+    rows = csv_rows(os.path.join(data_dir, "feature.csv"))
+    if rows >= 2:
+        console_print(f"  GP training set: {rows} labelled rows in {data_dir}")
+        return
+    console_print(f"  GP training set holds only {rows} labelled row(s) in "
+                  f"{data_dir}: it is seeded from the first generation.")
+    _check_reference_run(ORG)
+
+
+def _check_reference_run(ORG):
+    """Is the reference calculation behind the labels actually runnable?
+
+    The labels come from ``uspexkit.calc`` -> ``siesta_opt`` (mpirun + the
+    pseudopotentials of ``Specific/``); when either is missing the loop prints
+    a warning per generation and nothing ever enters the training set, so it is
+    worth saying so once, up front.
+    """
+    from gpevo.log_utils import console_print
+
+    missing = [name for name in ("siesta", "mpirun") if shutil.which(name) is None]
+    if missing:
+        console_print("  Warning: {} not found on PATH: labelled structures cannot "
+                      "be produced, so the GP training set cannot grow.".format(
+                          " and ".join(missing)))
+    home = getattr(ORG, "homePath", None) or "."
+    specific = os.path.join(home, str(getattr(ORG, "specificFolder", "Specific")))
+    if not glob.glob(os.path.join(specific, "*.psf")):
+        console_print(f"  Warning: no pseudopotential (*.psf) in {specific}; the "
+                      "reference calculation needs them.")
 
 
 def createORG_AbinitCode(inputFile):
@@ -175,6 +218,12 @@ def createORG_AbinitCode(inputFile):
     raw = p.option("mode")
     if raw is not None:
         ORG.gpMode = str(raw)
+    raw = p.option("nboot")
+    if raw is not None:
+        try:
+            ORG.gpNboot = max(0, int(float(raw)))
+        except ValueError:
+            pass
 
     if ORG.gp:
         # One extra step after the relaxations.  It repeats the last

@@ -91,3 +91,4 @@ data11_22 : data          % 训练数据目录（uspexkit 的 --data）
 0.04      : u             % 主动学习不确定度阈值（±1.96σ），超过才送 DFT
 1         : k             % 每代 EI top-K 个数
 ei        : mode          % ei | random | uncertainty
+2         : nboot         % 训练集为空时首批打标签的结构数（需 ≥2）

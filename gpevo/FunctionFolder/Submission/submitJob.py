@@ -261,19 +261,24 @@ def _submit_nonparallel(ind_no, step, code, how_come):
     # `1 : gp` appends a GP evaluation step after the relaxations; it runs
     # uspexkit.gp(...) in-process instead of an external command.
     from gpevo.FunctionFolder.USPEX.src.gp_ml import (
-        apply_gp_metrics, is_gp_step, run_gp,
+        apply_gp_metrics, gp_db_ready, gp_db_unavailable, is_gp_step, run_gp,
     )
 
     if is_gp_step(ORG, step):
         # gp() returns its metrics; storing them on the structure replaces the
-        # old round-trip through CalcFold1/gp.csv.
-        result = run_gp(ORG, cwd=cwd, id_=G["POP_STRUC"].bodyCount + 1)
-        if result is None:
-            # Terminal only: like the non-zero exit code of the subprocess it
-            # replaces, this is a per-job diagnostic, not part of the run log.
-            console_print("  Warning: uspexkit gp did not complete")
+        # old round-trip through CalcFold1/gp.csv.  Nothing can be fitted until
+        # the training set is seeded at the end of a generation, so skip it
+        # (once per generation) instead of failing on every structure.
+        if gp_db_ready(ORG):
+            result = run_gp(ORG, cwd=cwd, id_=G["POP_STRUC"].bodyCount + 1)
+            if result is None:
+                # Terminal only: like the non-zero exit code of the subprocess it
+                # replaces, this is a per-job diagnostic, not part of the run log.
+                console_print("  Warning: uspexkit gp did not complete")
+            else:
+                apply_gp_metrics(s, result)
         else:
-            apply_gp_metrics(s, result)
+            gp_db_unavailable(ORG, getattr(G["POP_STRUC"], "generation", 0))
         return 100
 
     # print(f"  Running in CalcFold{s.Folder}: {cmd}")

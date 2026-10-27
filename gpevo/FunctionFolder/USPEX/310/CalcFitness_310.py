@@ -66,12 +66,11 @@ def CalcFitness_310():
     POP.fitness = fitness
     G["POP_STRUC"] = POP
 
-    # Native port of `uspexkit denevo`: after the first generation has been
-    # evaluated (every structure carries the dict uspexkit.gp() returned, the
-    # model having just been trained on the database), draw the GP status
-    # figure from memory.  To plot every generation instead, drop the
-    # `== 1` condition.
-    if int(getattr(POP, "generation", 0)) == 1 and gp_enabled(ORG):
+    # Native port of `uspexkit denevo`: draw the GP status figure from memory
+    # every generation that actually carries predictions from ``gp()``.  Before
+    # the training set is seeded there is nothing to draw and plot_gp_generation
+    # says so and returns.
+    if int(getattr(POP, "generation", 0)) >= 1 and gp_enabled(ORG):
         try:
             from gpevo.FunctionFolder.USPEX.src.gp_plot import plot_gp_generation
             plot_gp_generation(ORG, POP, fitness)

@@ -38,6 +38,127 @@ _EI_DEFAULTS = {"u": 0.04, "k": 1, "mode": "ei"}
 
 _PKL_NAMES = ("gpr_density.pkl", "gpr_energy.pkl", "rfr.pkl")
 
+# Files uspexkit.gp() reads from ../<data> (see core.py:196-198).
+_DB_FILES = ("feature_mlp.csv", "feature.csv", "structures.traj")
+
+# Minimum number of labelled rows before uspexkit can train: both gp() and
+# pred() index the training array as data[:, 1:], which raises on a single row.
+_MIN_DB_ROWS = 2
+
+
+def gp_data_paths(ORG):
+    """``(home, resFolder, data_dir)`` used by the GP training database.
+
+    ``uspexkit.calc`` resolves the database as ``<parent of cwd>/<dat>`` and is
+    called with ``cwd=resFolder``, while ``gp()`` uses ``../<dat>`` relative to
+    a CalcFold -- both land on ``<home>/<dat>``.
+    """
+    home = getattr(ORG, "homePath", None) or os.getcwd()
+    res_folder = getattr(ORG, "resFolder", None) or ""
+    data_dir = os.path.join(home, str(_opt(ORG, "gpData", "data") or "data"))
+    return home, res_folder, data_dir
+
+
+def csv_rows(path):
+    """Number of data rows of a uspexkit csv (first line is the header)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fp:
+            lines = [line for line in fp if line.strip()]
+    except OSError:
+        return 0
+    return max(0, len(lines) - 1)
+
+
+def _db_rows(data_dir):
+    """Labelled rows of the training database, 0 when it is unusable."""
+    if not data_dir or not os.path.isdir(data_dir):
+        return 0
+    for name in _DB_FILES:
+        if not os.path.isfile(os.path.join(data_dir, name)):
+            return 0
+    rows = min(csv_rows(os.path.join(data_dir, "feature_mlp.csv")),
+               csv_rows(os.path.join(data_dir, "feature.csv")))
+    return max(0, rows)
+
+
+def gp_db_ready(ORG):
+    """True when uspexkit.gp() has something to train on."""
+    _, _, data_dir = gp_data_paths(ORG)
+    return _db_rows(data_dir) >= _MIN_DB_ROWS
+
+
+# (generation, data_dir) already reported to the user.  Module level, so a
+# resumed run starts clean and nothing lands in the ORG pickle.
+_WARNED_NO_DB = set()
+
+
+def gp_db_unavailable(ORG, generation=None):
+    """Explain once per generation why the GP step produces nothing.
+
+    Before the first generation has been labelled there is nothing for
+    ``gp()`` to fit, and without this guard every structure would print its own
+    failure line.
+    """
+    _, _, data_dir = gp_data_paths(ORG)
+    key = (int(generation or 0), data_dir)
+    if key in _WARNED_NO_DB:
+        return
+    _WARNED_NO_DB.add(key)
+    console_print(f"  GP step skipped: {data_dir} holds fewer than "
+                  f"{_MIN_DB_ROWS} labelled rows.")
+    console_print("                   the training set is seeded at the end of "
+                  "the generation.")
+
+
+def _invalidate_pkl(home, res_folder, data_dir):
+    """Drop cached models so the next prediction retrains on the grown set.
+
+    ``gp()`` fits from the CalcFold it runs in, ``pred()`` from the database
+    directory, so the pickles end up in several places; leaving any of them
+    behind means the next call silently reuses the old model.
+    """
+    directories = [data_dir, res_folder]
+    directories += sorted(glob.glob(os.path.join(str(home), "CalcFold*")))
+    removed = []
+    for directory in directories:
+        if not directory or not os.path.isdir(directory):
+            continue
+        for name in _PKL_NAMES:
+            path = os.path.join(directory, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    removed.append(path)
+                except OSError:
+                    pass
+    return removed
+
+
+def _prune_stale_id_dirs(res_folder, ids):
+    """Delete leftover ``<resFolder>/<id>`` directories with no result.
+
+    ``uspexkit.calc`` skips every id whose directory already exists, so a
+    failed reference calculation would blacklist that structure forever.
+    """
+    pruned = []
+    for number in ids:
+        directory = os.path.join(res_folder, str(int(number)))
+        if not os.path.isdir(directory):
+            continue
+        if os.path.isfile(os.path.join(directory, "POSCAR.{}".format(int(number)))):
+            continue                        # a completed run: keep its data
+        try:
+            shutil.rmtree(directory)
+            pruned.append(directory)
+        except OSError:
+            pass
+    return pruned
+
+
+def _pick_by_fitness(entries, fitness, nboot):
+    """The best *nboot* ``(index, number)`` entries, fitness ascending."""
+    order = sorted(entries, key=lambda entry: fitness[entry[0]])
+    return order[:max(0, int(nboot))]
 
 def _uspexkit_func(name):
     """Return the ``uspexkit.<name>`` callable, or None when unavailable."""
@@ -208,6 +329,10 @@ def parse_gp_params(ORG):
         "u": float(_opt(ORG, "gpU", _EI_DEFAULTS["u"])),
         "k": int(_opt(ORG, "gpK", _EI_DEFAULTS["k"])),
         "mode": str(_opt(ORG, "gpMode", _EI_DEFAULTS["mode"])),
+        # Structures labelled to seed an empty database; two is the minimum:
+        # uspexkit indexes the training array as data[:, 1:], which raises on
+        # a single row.
+        "nboot": int(_opt(ORG, "gpNboot", 2)),
     }
 
 
@@ -278,28 +403,14 @@ def _expected_improvement(mu, sigma, f_best):
     return diff * phi_z + sigma * pdf_z
 
 
-def gp_active_learning(ORG, POP, fitness):
-    """EI top-K active learning: DFT the uncertain candidates, then re-predict.
+def _select_by_ei(numbers, table, params):
+    """EI / uncertainty / random top-K selection of one generation.
 
-    Port of CalcFitness_310.m:114-422.  ``fitness`` is returned unchanged when
-    the generation is the first one, when nothing is valid, or when neither the
-    structures nor ``CalcFold1/gp.csv`` carry any GP metrics.
+    Returns ``(selected, mode_label, reason)``: *selected* holds
+    ``(number, sigma, density_gp, ei)`` for every crystal that cleared all
+    gates, and *reason* is a printable sentence naming the gate that stopped
+    the selection (``None`` on success).
     """
-    fitness = np.asarray(fitness, dtype=float)
-    if not gp_enabled(ORG) or int(getattr(POP, "generation", 0)) <= 1:
-        return fitness
-    valid = [i for i in range(len(POP.POPULATION)) if fitness[i] < 100000]
-    if not valid:
-        return fitness
-
-    params = parse_gp_params(ORG)
-    home_path = getattr(ORG, "homePath", os.getcwd())
-    gp_file = os.path.join(home_path, "CalcFold1", "gp.csv")
-    numbers = [int(getattr(POP.POPULATION[i], "Number", 0)) for i in valid]
-    table = metrics_table(POP, valid, numbers, gp_file)
-    if not table:
-        return fitness
-
     # Step 0: f_best = max density_gp over the valid crystals (residual <= 10)
     f_best = -float("inf")
     filtered = 0
@@ -315,9 +426,8 @@ def gp_active_learning(ORG, POP, fitness):
         console_print(f"  Filtered out {filtered} crystals with residual > 10")
 
     if f_best < params["den"]:
-        console_print(f"  density threshold gate: f_best={f_best:.4f} < "
-                      f"den={params['den']:.4f}, skipping GP/DFT/pred")
-        return fitness
+        return [], "", (f"density threshold gate: f_best={f_best:.4f} < "
+                        f"den={params['den']:.4f}")
 
     # Step 1: EI of every valid crystal
     ei_list, crystal_list, uncert_list, den_gp_list = [], [], [], []
@@ -331,7 +441,7 @@ def gp_active_learning(ORG, POP, fitness):
         uncert_list.append(sigma)
         den_gp_list.append(mu)
     if not ei_list:
-        return fitness
+        return [], "", "no crystal left after the residual filter"
 
     # Step 2: select top-K
     n_sel = min(int(params["k"]), len(ei_list))
@@ -351,50 +461,145 @@ def gp_active_learning(ORG, POP, fitness):
         order = sorted(range(len(ei_list)), key=lambda i: -ei_list[i])
         mode_label = "EI"
 
-    selected = [(crystal_list[i], uncert_list[i], den_gp_list[i], ei_list[i])
-                for i in order[:n_sel]]
-    selected = [s for s in selected if s[1] > params["u"]]
-    selected = [s for s in selected if s[2] >= params["den"]]
-
+    candidates = [(crystal_list[i], uncert_list[i], den_gp_list[i], ei_list[i])
+                  for i in order[:n_sel]]
+    above_u = [s for s in candidates if s[1] > params["u"]]
+    if not above_u:
+        return [], mode_label, (f"no crystal above the uncertainty threshold "
+                                f"({params['u']:.4f}) among the top-{n_sel}")
+    selected = [s for s in above_u if s[2] >= params["den"]]
     if not selected:
-        console_print(f"  -> No crystals above uncertainty threshold "
-                      f"({params['u']:.4f}), skipping DFT and pred")
+        return [], mode_label, (f"every top-{n_sel} crystal is below the density "
+                                f"gate den={params['den']:.4f}")
+    return selected, mode_label, None
+
+
+def gp_active_learning(ORG, POP, fitness):
+    """Label a few structures of this generation, then re-predict them.
+
+    Port of CalcFitness_310.m:114-422 with two things the MATLAB version lacks:
+
+    * **Bootstrap**: when the database is still empty the best structures of
+      the generation are labelled straight away, so a run no longer depends on
+      a ready-made ``<data>`` directory.
+    * **Real retraining**: the pickled models are dropped everywhere
+      ``uspexkit`` wrote them (they are keyed by a kernel version stamp and
+      nothing else), so the next prediction trains on the enlarged set.
+
+    ``fitness`` comes back unchanged whenever no training row was added; every
+    gate that stops the loop says which one it was.
+    """
+    fitness = np.asarray(fitness, dtype=float)
+    if not gp_enabled(ORG):
+        return fitness
+    valid = [i for i in range(len(POP.POPULATION)) if fitness[i] < 100000]
+    if not valid:
+        console_print("  No valid structures this generation: GP training set unchanged")
         return fitness
 
-    console_print(f"{mode_label} top-{int(params['k'])} selection: "
-                  f"{len(selected)}/{n_sel} crystals above threshold "
-                  f"({params['u']:.4f})")
-    for rank, (number, sigma, mu, ei) in enumerate(selected, start=1):
-        console_print(f"  {rank}: crystal {number}  EI={ei:.6f}  den_gp={mu:.4f}"
-                      f"  sigma={sigma:.4f}  f_best={f_best:.4f}")
-    _write_ei_log(ORG, POP.generation, [s[0] for s in selected])
-
-    res_folder = getattr(ORG, "resFolder", None)
+    params = parse_gp_params(ORG)
+    home, res_folder, data_dir = gp_data_paths(ORG)
     if not res_folder or not os.path.isdir(res_folder):
-        console_print("  Warning: resFolder is missing, skipping traj/calc/pred")
+        console_print("  Warning: resFolder is missing, GP training set unchanged")
         return fitness
-    crystal_ids = " ".join(str(int(s[0])) for s in selected)
 
-    # Step 3: the trajectory already exists -- WriteIndividualOutput_310
+    # Step: the trajectory already exists -- WriteIndividualOutput_310
     # appends a frame to Individuals.traj for every structure that goes into
     # gatheredPOSCARS, so no conversion step is needed here.
     traj_file = os.path.join(res_folder, "Individuals.traj")
     if not os.path.isfile(traj_file):
         console_print("  Warning: Individuals.traj is missing in "
                       f"{res_folder}; this run directory predates the "
-                      "per-structure trajectory, skipping calc/pred")
+                      "per-structure trajectory, GP training set unchanged")
         return fitness
 
-    # Step 4: DFT on the selected crystals
+    numbers = [int(getattr(POP.POPULATION[i], "Number", 0)) for i in valid]
+    table = metrics_table(POP, valid, numbers, os.path.join(home, "CalcFold1", "gp.csv"))
+    rows_before = _db_rows(data_dir)
+
+    if rows_before >= _MIN_DB_ROWS and table:
+        selected, mode_label, reason = _select_by_ei(numbers, table, params)
+        if reason is not None:
+            console_print(f"  {reason}; GP training set unchanged")
+            return fitness
+        pred_ids = [n for n in numbers if n in table and table[n][1] <= 10]
+    else:
+        # Nothing to learn from yet: seed the database instead of waiting for a
+        # generation that carries GP predictions.
+        if rows_before < _MIN_DB_ROWS:
+            console_print(f"  GP training set has only {rows_before} labelled "
+                          f"row(s) in {data_dir}: seeding it with the best "
+                          f"structures of generation "
+                          f"{int(getattr(POP, 'generation', 0))}")
+        else:
+            console_print("  No GP metrics this generation, seeding the training "
+                          "set with its best structures")
+        entries = _pick_by_fitness(list(zip(valid, numbers)), fitness, params["nboot"])
+        selected = [(number, float("nan"), float("nan"), float("nan"))
+                    for _, number in entries]
+        pred_ids = [number for _, number in entries]
+        mode_label = "fitness (bootstrap)"
+
+    if not selected:
+        console_print("  Nothing selected for the reference calculation: "
+                      "GP training set unchanged")
+        return fitness
+
+    if mode_label.endswith("(bootstrap)"):
+        console_print(f"  Bootstrap: the best {len(selected)} structure(s) go to "
+                      "the reference calculation")
+        for rank, entry in enumerate(selected, start=1):
+            number = entry[0]
+            index = valid[numbers.index(number)]
+            console_print(f"  {rank}: crystal {number}  fitness={fitness[index]:.6f}")
+    else:
+        console_print(f"{mode_label} top-{int(params['k'])} selection: "
+                      f"{len(selected)} crystals above threshold "
+                      f"({params['u']:.4f})")
+        for rank, (number, sigma, mu, ei) in enumerate(selected, start=1):
+            console_print(f"  {rank}: crystal {number}  EI={ei:.6f}  den_gp={mu:.4f}"
+                          f"  sigma={sigma:.4f}")
+    _write_ei_log(ORG, POP.generation, [s[0] for s in selected])
+
+    ids_list = [int(s[0]) for s in selected]
+    stale_dirs = _prune_stale_id_dirs(res_folder, ids_list)
+    if stale_dirs:
+        console_print("  Removed {} result folder(s) of a previous aborted "
+                      "reference run: {}".format(
+                          len(stale_dirs),
+                          ", ".join(os.path.basename(p) for p in stale_dirs)))
+
+    # calc() chdirs into <parent of cwd>/<dat> without creating it.
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except OSError as exc:
+        console_print(f"  Warning: cannot create GP data directory {data_dir}: {exc}")
+        return fitness
+
+    crystal_ids = " ".join(str(i) for i in ids_list)
     console_print(f"  Running: uspexkit.calc(ids='{crystal_ids}')")
-    if not _call("calc", cwd=res_folder, t="Individuals.traj", den=params["den"],
-                 ids=crystal_ids, step=500, ncpu=int(params["ncpu"]),
-                 dat=params["dat"], tolerance=0.01)[0]:
+    ok, _unused = _call("calc", cwd=res_folder, t="Individuals.traj", den=params["den"],
+                        ids=crystal_ids, step=500, ncpu=int(params["ncpu"]),
+                        dat=params["dat"], tolerance=0.01)
+    if not ok:
+        console_print("  Warning: uspexkit.calc failed: the reference calculation "
+                      "needs `siesta` on PATH and <homePath>/Specific/*.psf")
         return fitness
 
-    # Step 5: retrain the GP on the enlarged database and re-predict
-    pred_ids = [number for number in numbers
-                if number in table and table[number][1] <= 10]
+    rows_after = _db_rows(data_dir)
+    if rows_after <= rows_before:
+        console_print(f"  Warning: uspexkit.calc ran {len(ids_list)} structure(s) but "
+                      f"the training set is still {rows_after} row(s) in {data_dir};")
+        console_print("           they were either already in the database, or the "
+                      "reference calculation produced no row")
+        return fitness
+
+    # Step: retrain on the enlarged database -- the pickles have to go from
+    # every directory uspexkit may have cached them in.
+    dropped = _invalidate_pkl(home, res_folder, data_dir)
+    console_print(f"  GP training set: {rows_before} -> {rows_after} rows; "
+                  f"dropped {len(dropped)} cached model(s)")
+
     if not pred_ids:
         console_print("  No valid crystals with residual <= 10, skipping pred")
         return fitness
@@ -402,21 +607,6 @@ def gp_active_learning(ORG, POP, fitness):
     pred_log = os.path.join(res_folder, "density_predict.log")
     if os.path.isfile(pred_log):
         os.remove(pred_log)
-    # Force a retrain: the pickled models move to CalcFold1 and the data
-    # directory loses them (CalcFitness_310.m:361).
-    data_dir = os.path.join(home_path, str(params["dat"]))
-    calc_fold = os.path.join(home_path, "CalcFold1")
-    for src in glob.glob(os.path.join(data_dir, "*.pkl")):
-        try:
-            shutil.copy2(src, calc_fold)
-        except OSError:
-            pass
-    for name in _PKL_NAMES:
-        try:
-            os.remove(os.path.join(data_dir, name))
-        except OSError:
-            pass
-
     console_print(f"  Running: uspexkit.pred(ids='{' '.join(str(i) for i in pred_ids)}')")
     ok, results = _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
                         ncpu=int(params["ncpu"]), den=0.0,
