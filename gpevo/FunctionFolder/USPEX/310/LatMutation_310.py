@@ -4,29 +4,77 @@ from __future__ import annotations
 import numpy as np
 
 from gpevo.runtime import G
+from gpevo.matrix import det, latConverter
 from gpevo.FunctionFolder.USPEX.src.variation_common import (
     copy_individual, finalize_offspring, pick_parent, valid_molecules,
 )
+from gpevo.FunctionFolder.sys.optLattice import optLattice
+from gpevo.FunctionFolder.sys.latticeCheck import latticeCheck
 from gpevo.log_utils import console_print
 
 
 def LatMutation_310(count):
     _ = count
     POP = G["POP_STRUC"]
-    # Strain scale from ``mutationRate`` (README: LatMutation 的应变率).
-    # The diagonal/shear model below multiplies every matrix entry by this
-    # ``scale``, so ``mutationRate`` is the half-width of the uniform strain
-    # (0.04 on either side), matching the previous hard-coded 0.08 default.
-    strain_scale = float(getattr(G["ORG_STRUC"], "mutationRate", 0.08) or 0.08)
+    # Strain model ported from lattice_Mutation.m: six independent normal
+    # strains (epsilons = randn(6,1) * mutationRate) form a symmetric strain
+    # matrix -- diagonal 1+eps, off-diagonal eps/2 -- right-multiplied onto
+    # the lattice (new_Lattice = old_lattice * strainMatrix), then the cell
+    # volume is restored (lattice_Mutation.m:23-29), so the move changes the
+    # cell shape without changing its density.  ``mutationRate`` is the strain
+    # standard deviation (lattice_Mutation defaults to 0.25; gpevo keeps a
+    # gentler 0.08 that users can override in INPUT.txt).
+    mutation_rate = float(getattr(G["ORG_STRUC"], "mutationRate", 0.08) or 0.08)
     for _ in range(50):
         idx = pick_parent()
         if idx is None or idx >= len(POP.POPULATION):
             continue
         child = copy_individual(POP.POPULATION[idx])
         lat = np.asarray(child.LATTICE, dtype=float).reshape(3, 3)
-        strain = np.eye(3) + (np.random.rand(3, 3) - 0.5) * strain_scale
-        child.LATTICE = strain @ lat
+
+        eps = np.random.randn(6) * mutation_rate
+        strain = np.eye(3)
+        strain[0, 0] += eps[0]
+        strain[1, 1] += eps[1]
+        strain[2, 2] += eps[2]
+        strain[0, 1] = eps[3] / 2.0
+        strain[1, 0] = eps[3] / 2.0
+        strain[0, 2] = eps[4] / 2.0
+        strain[2, 0] = eps[4] / 2.0
+        strain[1, 2] = eps[5] / 2.0
+        strain[2, 1] = eps[5] / 2.0
+        new_lat = lat @ strain
+
+        # Volume restoration (lattice_Mutation.m:23-29).
+        vol_new = det(new_lat)
+        vol_old = det(lat)
+        if not (np.isfinite(vol_new) and np.isfinite(vol_old)
+                and vol_new > 1e-6 and vol_old > 1e-6):
+            continue
+        ratio = vol_old / vol_new
+        params = np.asarray(latConverter(new_lat), dtype=float).reshape(-1)[:6].copy()
+        params[:3] = params[:3] * (ratio ** (1.0 / 3.0))
+        mut_lat = np.asarray(latConverter(params), dtype=float).reshape(3, 3)
+
+        # optLattice step (LatMutation_310.m:27-37): reduce the mutated
+        # lattice, then translate each molecule rigidly by the re-wrapping
+        # displacement of its first atom so the molecules follow the reduced
+        # cell (`absolute = coord - coor1` applied to every atom of the
+        # molecule).  ``latticeCheck`` then gates the result together with
+        # ``newMolCheck`` (LatMutation_310.m:38-39), while gpevo's other
+        # operators leave the lattice check to the relaxation.
+        coor1 = np.array([np.asarray(mol.MOLCOORS, dtype=float)[0]
+                          for mol in child.MOLECULES], dtype=float)
+        coord, mut_lat = optLattice(coor1, mut_lat)
+        absolute = coord - coor1
+        for j, mol in enumerate(child.MOLECULES):
+            mol.MOLCOORS = np.asarray(mol.MOLCOORS, dtype=float) + absolute[j]
+            mol.MOLCENTER = np.mean(np.asarray(mol.MOLCOORS, dtype=float), axis=0)
+        child.LATTICE = np.asarray(mut_lat, dtype=float).reshape(3, 3)
+
         if not valid_molecules(child, 0):
+            continue
+        if not latticeCheck(child.LATTICE):
             continue
         finalize_offspring(child, "LatMutate")
         G["OFF_STRUC"].POPULATION.append(child)

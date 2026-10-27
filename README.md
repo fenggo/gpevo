@@ -151,7 +151,7 @@ ei        : mode          % ei | random | uncertainty
 ```
 45     : rotationAngleMax   % 旋转变异角度上限，**单位度**（内部转弧度）
 0.3    : translationMax     % 旋转后的刚体平移上限
-0.15   : mutationRate       % LatMutation 的应变率
+0.15   : mutationRate       % LatMutation 应变 σ（正态分布，对齐 lattice_Mutation）
 1.5    : softStepScale      % softmutate 步长缩放
 ```
 
