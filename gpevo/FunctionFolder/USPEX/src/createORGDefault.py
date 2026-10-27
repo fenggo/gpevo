@@ -64,6 +64,7 @@ def createORGDefault():
     ORG.gpU = 0.04          # uncertainty threshold of the active learning
     ORG.gpK = 1             # top-K crystals selected per generation
     ORG.gpMode = "ei"       # ei | random | uncertainty
+    ORG.gpNboot = 2         # structures labelled to seed an empty training set
     ORG.opt_sign = 1
     ORG.dimension = 3
     ORG.molecule = 0
