@@ -23,7 +23,16 @@ def newMolCheck(molecules, lattice, mtype_list, min_matrix):
         mt = mtype_list[i]
         std = stdmol[mt - 1]
         mol_coords.append(np.asarray(mol.MOLCOORS, dtype=float))
-        mol_types.append([int(t) for t in std.types])
+        classes = [int(t) for t in std.types]
+        # ``std.types`` holds 1-based positions into ORG.atomType (see
+        # read_molecules.py:116 / GetPOP_MOL.py:19).  A value out of that
+        # range means the molecule was built from an element absent from
+        # atomType (read_molecules.py records it as 0): the code can not look
+        # up its distance threshold, and indexing min_matrix with it would
+        # silently wrap to the last row/column.  Reject the structure instead.
+        if any(t <= 0 or t > len(ORG.atomType) for t in classes):
+            return 0
+        mol_types.append(classes)
 
     # Intermolecular checks
     for i in range(n_mols - 1):
