@@ -302,11 +302,22 @@ def apply_pred_metrics(s, entry):
     return True
 
 
+# Row layout shared by ``_metrics_row`` and ``_read_gp_csv`` (the gp.csv
+# columns of uspexkit core.py:223-224 with the leading id stripped):
+#   0 nearest, 1 residual, 2 density_min, 3 density_rf, 4 density_gp,
+#   5 uncertainty, 6 energy_min, 7 energy_pred, 8 uncertainty_eng
+_DEN_GP, _UNCERT = 4, 5
+_ENG_GP, _UNCERT_ENG = 7, 8
+_ROW_LEN = 9
+
+
 def _metrics_row(s):
     """Row layout of ``_read_gp_csv``, built from stored per-structure values."""
     return [float("nan"), _finite(getattr(s, "distance", None)), float("nan"),
             float("nan"), _finite(getattr(s, "density_gp", None)),
-            _finite(getattr(s, "uq", None))]
+            _finite(getattr(s, "uq", None)), float("nan"),
+            _finite(getattr(s, "energy_gp", None)),
+            _finite(getattr(s, "uq_eng", None))]
 
 
 def metrics_table(POP, valid, numbers, gp_file):
@@ -318,7 +329,8 @@ def metrics_table(POP, valid, numbers, gp_file):
     table = {}
     for index, number in zip(valid, numbers):
         row = _metrics_row(POP.POPULATION[index])
-        if math.isfinite(row[1]) or math.isfinite(row[4]):
+        if (math.isfinite(row[1]) or math.isfinite(row[_DEN_GP])
+                or math.isfinite(row[_ENG_GP])):
             table[number] = row
     if not table:
         table = _read_gp_csv(gp_file)
@@ -342,6 +354,11 @@ def parse_gp_params(ORG):
         # uspexkit indexes the training array as data[:, 1:], which raises on
         # a single row.
         "nboot": int(_opt(ORG, "gpNboot", 2)),
+        # optType 1 minimises the enthalpy, so the acquisition runs on the GP
+        # energy; every other optType keeps the density.
+        "optType": int(getattr(ORG, "optType", 11) or 11),
+        # 1 for a minimisation run, -1 for `-N : optType` (maximisation).
+        "optSign": float(getattr(ORG, "opt_sign", 1) or 1),
     }
 
 
@@ -361,6 +378,10 @@ def _read_gp_csv(path):
     Columns (CalcFitness_310.m:183-189):
     0 id, 1 nearest index, 2 residual, 3 density_min, 4 density_rf,
     5 density_gp, 6 uncertainty, 7 energy_min, 8 energy_pred, 9 uncertainty_eng
+
+    The id is stripped, so the stored row starts at the nearest index (see
+    ``_ROW_LEN``).  Short or unreadable cells become NaN: an old gp.csv whose
+    two last columns are still empty must not cost the whole row.
     """
     table = {}
     try:
@@ -372,9 +393,10 @@ def _read_gp_csv(path):
                     continue
                 try:
                     key = int(float(row[0]))
-                    values = [float(value) for value in row[1:7]]
                 except (TypeError, ValueError):
                     continue
+                values = [_finite(value) for value in row[1:_ROW_LEN + 1]]
+                values += [float("nan")] * (_ROW_LEN - len(values))
                 table.setdefault(key, values)
     except OSError:
         return {}
@@ -412,16 +434,57 @@ def _expected_improvement(mu, sigma, f_best):
     return diff * phi_z + sigma * pdf_z
 
 
+def _ei_target(params):
+    """``(mu column, sigma column, name)`` of the quantity EI is computed on.
+
+    optType 1 minimises the enthalpy, so the acquisition has to run on the GP
+    energy prediction and on *its* uncertainty (gp.csv columns 8/9); every
+    other optType keeps the density (columns 5/6), as the MATLAB reference
+    does.
+    """
+    if int(params.get("optType", 11) or 11) == 1:
+        return _ENG_GP, _UNCERT_ENG, "eng_gp"
+    return _DEN_GP, _UNCERT, "den_gp"
+
+
+def _usable(numbers, table, mu_col, sigma_col):
+    """True when at least one valid crystal carries both predictions."""
+    for number in numbers:
+        row = table.get(number)
+        if row is None or row[1] > 10:
+            continue
+        if math.isfinite(row[mu_col]) and math.isfinite(row[sigma_col]):
+            return True
+    return False
+
+
 def _select_by_ei(numbers, table, params):
     """EI / uncertainty / random top-K selection of one generation.
 
-    Returns ``(selected, mode_label, reason)``: *selected* holds
-    ``(number, sigma, density_gp, ei)`` for every crystal that cleared all
-    gates, and *reason* is a printable sentence naming the gate that stopped
-    the selection (``None`` on success).
+    Returns ``(selected, mode_label, reason, target)``: *selected* holds
+    ``(number, sigma, mu, ei)`` for every crystal that cleared all gates --
+    *mu* being the GP energy for optType 1 and the GP density otherwise --
+    and *reason* is a printable sentence naming the gate that stopped the
+    selection (``None`` on success).
     """
-    # Step 0: f_best = max density_gp over the valid crystals (residual <= 10)
+    mu_col, sigma_col, target = _ei_target(params)
+    # optType 1 on a run that carries no energy prediction at all (an old
+    # gp.csv, or a gp() that failed) still has something to learn from.
+    if target == "eng_gp" and not _usable(numbers, table, mu_col, sigma_col):
+        console_print("  optType 1 but no GP energy prediction this generation: "
+                      "the EI selection falls back to the density")
+        mu_col, sigma_col, target = _DEN_GP, _UNCERT, "den_gp"
+
+    # optType 1 minimises, so the acquisition runs on -energy_gp and f_best
+    # is -min(energy_gp); the density is maximised and keeps mu as it is.
+    # `-N : optType` inverts both (opt_sign = -1).
+    opt_sign = float(params.get("optSign", 1) or 1)
+    sign = -opt_sign if target == "eng_gp" else opt_sign
+
+    # Step 0: f_best = best predicted value over the valid crystals
+    # (residual <= 10); best_density drives the `den` gate below.
     f_best = -float("inf")
+    best_density = -float("inf")
     filtered = 0
     for number in numbers:
         row = table.get(number)
@@ -430,27 +493,36 @@ def _select_by_ei(numbers, table, params):
         if row[1] > 10:                     # residual
             filtered += 1
             continue
-        f_best = max(f_best, row[4])        # density_gp
+        if math.isfinite(row[_DEN_GP]):
+            best_density = max(best_density, row[_DEN_GP])
+        mu, sigma = row[mu_col], row[sigma_col]
+        if not (math.isfinite(mu) and math.isfinite(sigma)):
+            continue
+        f_best = max(f_best, sign * mu)
     if filtered > 0:
         console_print(f"  Filtered out {filtered} crystals with residual > 10")
 
-    if f_best < params["den"]:
-        return [], "", (f"density threshold gate: f_best={f_best:.4f} < "
-                        f"den={params['den']:.4f}")
+    # `den` is a density, so it gates on the predicted density whatever the
+    # acquisition target is; -inf means no crystal carries one at all.
+    if math.isfinite(best_density) and best_density < params["den"]:
+        return [], "", (f"density threshold gate: best density="
+                        f"{best_density:.4f} < den={params['den']:.4f}"), target
 
     # Step 1: EI of every valid crystal
-    ei_list, crystal_list, uncert_list, den_gp_list = [], [], [], []
+    ei_list, crystal_list, uncert_list, mu_list = [], [], [], []
     for number in numbers:
         row = table.get(number)
         if row is None or row[1] > 10:
             continue
-        mu, sigma = row[4], row[5]
-        ei_list.append(_expected_improvement(mu, sigma, f_best))
+        mu, sigma = row[mu_col], row[sigma_col]
+        if not (math.isfinite(mu) and math.isfinite(sigma)):
+            continue
+        ei_list.append(_expected_improvement(sign * mu, sigma, f_best))
         crystal_list.append(number)
         uncert_list.append(sigma)
-        den_gp_list.append(mu)
+        mu_list.append(mu)
     if not ei_list:
-        return [], "", "no crystal left after the residual filter"
+        return [], "", f"no crystal with a usable {target} prediction", target
 
     # Step 2: select top-K
     n_sel = min(int(params["k"]), len(ei_list))
@@ -470,17 +542,25 @@ def _select_by_ei(numbers, table, params):
         order = sorted(range(len(ei_list)), key=lambda i: -ei_list[i])
         mode_label = "EI"
 
-    candidates = [(crystal_list[i], uncert_list[i], den_gp_list[i], ei_list[i])
+    candidates = [(crystal_list[i], uncert_list[i], mu_list[i], ei_list[i])
                   for i in order[:n_sel]]
     above_u = [s for s in candidates if s[1] > params["u"]]
     if not above_u:
         return [], mode_label, (f"no crystal above the uncertainty threshold "
-                                f"({params['u']:.4f}) among the top-{n_sel}")
-    selected = [s for s in above_u if s[2] >= params["den"]]
+                                f"({params['u']:.4f}) among the top-{n_sel}"), target
+    # `den` gates on the predicted density, taken from the row itself: the
+    # candidate holds the acquisition value, which is the energy for optType 1.
+    selected = [s for s in above_u if not _below_den(table[s[0]], params["den"])]
     if not selected:
         return [], mode_label, (f"every top-{n_sel} crystal is below the density "
-                                f"gate den={params['den']:.4f}")
-    return selected, mode_label, None
+                                f"gate den={params['den']:.4f}"), target
+    return selected, mode_label, None, target
+
+
+def _below_den(row, den):
+    """True when the crystal's predicted density is under the ``den`` gate."""
+    density = row[_DEN_GP] if row is not None else float("nan")
+    return math.isfinite(density) and density < den
 
 
 def gp_active_learning(ORG, POP, fitness):
@@ -527,7 +607,7 @@ def gp_active_learning(ORG, POP, fitness):
     rows_before = _db_rows(data_dir)
 
     if rows_before >= _MIN_DB_ROWS and table:
-        selected, mode_label, reason = _select_by_ei(numbers, table, params)
+        selected, mode_label, reason, target = _select_by_ei(numbers, table, params)
         if reason is not None:
             console_print(f"  {reason}; GP training set unchanged")
             return fitness
@@ -548,6 +628,7 @@ def gp_active_learning(ORG, POP, fitness):
                     for _, number in entries]
         pred_ids = [number for _, number in entries]
         mode_label = "fitness (bootstrap)"
+        target = "fitness"
 
     if not selected:
         console_print("  Nothing selected for the reference calculation: "
@@ -562,11 +643,15 @@ def gp_active_learning(ORG, POP, fitness):
             index = valid[numbers.index(number)]
             console_print(f"  {rank}: crystal {number}  fitness={fitness[index]:.6f}")
     else:
-        console_print(f"{mode_label} top-{int(params['k'])} selection: "
+        # `-N : optType` is stored as optType=N with opt_sign=-1.
+        opt_label = ("-" if float(params["optSign"]) < 0 else "") + str(
+            int(params["optType"]))
+        console_print(f"{mode_label} top-{int(params['k'])} selection on "
+                      f"{target} (optType {opt_label}): "
                       f"{len(selected)} crystals above threshold "
                       f"({params['u']:.4f})")
         for rank, (number, sigma, mu, ei) in enumerate(selected, start=1):
-            console_print(f"  {rank}: crystal {number}  EI={ei:.6f}  den_gp={mu:.4f}"
+            console_print(f"  {rank}: crystal {number}  EI={ei:.6f}  {target}={mu:.4f}"
                           f"  sigma={sigma:.4f}")
     _write_ei_log(ORG, POP.generation, [s[0] for s in selected])
 

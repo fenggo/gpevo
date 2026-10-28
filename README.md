@@ -135,6 +135,16 @@ ei        : mode          % ei | random | uncertainty
 
 > 若 `gp` 一行因写法问题没被读入（例如关键字被注释污染），开关会**静默**保持 0——整条 GP 链都不发生。启动时会打印告警列出有问题的行。
 
+EI 用哪个量做采集函数，由 `optType` 决定：
+
+| optType | 采集量 μ | σ |
+|---|---|---|
+| `1`（焓极小） | GP 预测能量 `energy_gp` 取负（极小化） | `uncertainty_eng` |
+| `-1`（焓极大） | 同上取正（极大化） | `uncertainty_eng` |
+| 其它（默认 11 等） | GP 预测密度 `density_gp`（极大化） | `uncertainty` |
+
+`den`（密度门）不受此影响，始终作用在预测密度上；`u`（±1.96σ）则作用在对应采集量的 σ 上，因此 optType 1 时它的单位是能量（eV），按能量不确定度的量级调即可。整代没有一个结构带可用的能量预测时（老 gp.csv 或 gp() 失败），会打印一行提示并退回密度。
+
 流程：
 
 1. **自举（第一代末）**：训练库不足 2 行时，按适应度取前 `nboot` 个结构，`uspexkit.calc()` 用参考方法（SIESTA）算它们的能量/密度，自动建起 `<homePath>/<data>/{feature_mlp.csv, feature.csv, structures.traj}`。这一代 GP 步整体跳过（无任何结构失败）。

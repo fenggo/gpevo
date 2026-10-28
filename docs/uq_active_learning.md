@@ -43,6 +43,8 @@ The algorithm is implemented as a post-processing step in `CalcFitness_310.m`, e
 
 **Step 3: Threshold decision.** If the density uncertainty $\sigma > \sigma_{\text{thresh}}$ (default $\sigma_{\text{thresh}} = 0.04$), the active learning cycle is triggered. The threshold is configurable via the `--u` parameter in `INPUT.txt`.
 
+> **Acquisition target (`gpevo`).** Columns 7 and 10 are not interchangeable: the acquisition runs on the pair that matches the objective. For `optType 1` (and `-1`) the target is the GP **energy** (column 9) with the **energy uncertainty** (column 10) — minimised, i.e. EI is computed on $-\hat{E}$; every other `optType` keeps the density pair (columns 6–7), maximised. The `--u` threshold then applies to whichever $\sigma$ is in use, so its unit follows the target. `--den` always gates on the predicted density.
+
 **Step 4: Active learning cycle.** When triggered, three sub-steps execute:
 
 1. **Trajectory generation** (`uspexkit traj`): An ASE trajectory file (`Individuals.traj`) is generated from the gathered POSCAR files and the Individuals log, providing a unified structure representation.

@@ -57,17 +57,21 @@ def run(tmp_path):
     return home, res_folder, data_dir
 
 
-def _individual(number, residual=1.0, density_gp=None, sigma=0.05):
+def _individual(number, residual=1.0, density_gp=None, sigma=0.05,
+                energy_gp=-100.0, sigma_eng=0.1):
     """A structure ready for the learning loop; no GP prediction by default."""
     return struct(Number=number, Enthalpies=np.array([-100.0]),
                   numMols=[2], numIons=[2], distance=residual,
-                  density_gp=density_gp, uq=sigma, energy_gp=-100.0, uq_eng=0.1)
+                  density_gp=density_gp, uq=sigma, energy_gp=energy_gp,
+                  uq_eng=sigma_eng)
 
 
-def _org(home, res_folder, *, u=0.04, k=2, mode="ei", nboot=2, den=1.8):
+def _org(home, res_folder, *, u=0.04, k=2, mode="ei", nboot=2, den=1.8,
+         opt_type=11):
     return struct(gp=1, gpData="data", gpDen=den, gpNcpu=4, gpU=u, gpK=k,
                   gpMode=mode, gpNboot=nboot, homePath=home, resFolder=res_folder,
-                  optType=11, opt_sign=1, numMols=[2], specificFolder="Specific")
+                  optType=opt_type, opt_sign=1, numMols=[2],
+                  specificFolder="Specific")
 
 
 def _population(numbers):
@@ -235,6 +239,79 @@ def test_density_gate_stops_the_selection(run, monkeypatch, capsys):
 
     assert fake.calls == []
     assert "density threshold gate" in capsys.readouterr().out
+
+
+def test_optType1_ranks_by_gp_energy(run, monkeypatch, capsys):
+    """optType 1 minimises the enthalpy: EI has to run on the GP energy."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    # identical densities: a density-driven EI could not tell them apart,
+    # and the lowest energy is the one with the *highest* EI.
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05, energy_gp=-5.0, sigma_eng=0.10),
+        _individual(12, density_gp=1.90, sigma=0.05, energy_gp=-6.0, sigma_eng=0.10),
+        _individual(13, density_gp=1.90, sigma=0.05, energy_gp=-5.5, sigma_eng=0.10),
+    ])
+    org = _org(home, res_folder, k=1, mode="ei", opt_type=1)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0, -1.0]))
+
+    assert fake.ids_of("calc") == ["12"]        # lowest enthalpy
+    assert "eng_gp" in capsys.readouterr().out
+
+
+def test_optType1_ranks_uncertainty_by_the_energy_one(run, monkeypatch):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.50, energy_gp=-5.0, sigma_eng=0.10),
+        _individual(12, density_gp=1.90, sigma=0.05, energy_gp=-6.0, sigma_eng=0.40),
+    ])
+    org = _org(home, res_folder, k=1, mode="uncertainty", opt_type=1)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    # sigma_eng, not the density uncertainty, decides
+    assert fake.ids_of("calc") == ["12"]
+
+
+def test_negative_optType1_maximises_the_energy(run, monkeypatch):
+    """`-1 : optType` maximises the enthalpy: the sign has to flip."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05, energy_gp=-5.0, sigma_eng=0.10),
+        _individual(12, density_gp=1.90, sigma=0.05, energy_gp=-6.0, sigma_eng=0.10),
+    ])
+    org = _org(home, res_folder, k=1, mode="ei", opt_type=1)
+    org.opt_sign = -1
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    assert fake.ids_of("calc") == ["11"]        # highest enthalpy
+
+
+def test_optType1_falls_back_to_density_without_energy(run, monkeypatch, capsys):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05, energy_gp=float("nan")),
+        _individual(12, density_gp=1.95, sigma=0.05, energy_gp=float("nan")),
+    ])
+    org = _org(home, res_folder, k=1, mode="ei", opt_type=1)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    assert fake.ids_of("calc") == ["12"]
+    assert "falls back to the density" in capsys.readouterr().out
 
 
 def test_missing_reference_run_never_retrains(run, monkeypatch, capsys):
