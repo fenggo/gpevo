@@ -458,7 +458,53 @@ def _usable(numbers, table, mu_col, sigma_col):
     return False
 
 
-def _select_by_ei(numbers, table, params):
+def _observed_incumbent(data_dir, target, sign):
+    """Best observed (DFT) value from ``<data_dir>/feature.csv``, in EI space.
+
+    ``feature.csv`` holds the labelled ground truth the GP was trained on:
+    ``etot`` (total energy) and ``density`` are the DFT-computed labels
+    (uspexkit/core.py appends ``energy`` / ``density_`` there).  The chief
+    defect of the previous EI was that ``f_best`` came from the GP's own
+    prediction; a wrong incumbent shifts every Z score and biases the pick
+    toward exploitation.  The honest incumbent is the observed value.
+
+    Returns the incumbent in the *EI target space* (``sign * value``), or
+    ``None`` when the file is missing, empty or lacks the needed column, in
+    which case the caller falls back to the predicted value.
+    """
+    if not data_dir:
+        return None
+    column = "etot" if target == "eng_gp" else "density"
+    path = os.path.join(data_dir, "feature.csv")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fp:
+            reader = csv.reader(fp)
+            header = next(reader, None)
+            if header is None:
+                return None
+            names = [t.strip() for t in header]
+            try:
+                col = names.index(column)
+            except ValueError:
+                return None
+            values = []
+            for row in reader:
+                cell = row[col].strip() if col < len(row) else ""
+                if cell:
+                    try:
+                        values.append(float(cell))
+                    except ValueError:
+                        continue
+    except OSError:
+        return None
+    if not values:
+        return None
+    arr = np.asarray(values, dtype=float)
+    best = float(np.min(arr)) if sign < 0 else float(np.max(arr))
+    return sign * best
+
+
+def _select_by_ei(numbers, table, params, data_dir=None):
     """EI / uncertainty / random top-K selection of one generation.
 
     Returns ``(selected, mode_label, reason, target)``: *selected* holds
@@ -481,9 +527,13 @@ def _select_by_ei(numbers, table, params):
     opt_sign = float(params.get("optSign", 1) or 1)
     sign = -opt_sign if target == "eng_gp" else opt_sign
 
-    # Step 0: f_best = best predicted value over the valid crystals
-    # (residual <= 10); best_density drives the `den` gate below.
-    f_best = -float("inf")
+    observed = _observed_incumbent(data_dir, target, sign)
+    # Step 0: f_best is the incumbent EI measures improvement against.
+    # The observed best in feature.csv wins when present; only a missing or
+    # empty database falls back to the GP's own (noisy) prediction.
+    # ``best_density`` is always read off the predictions: the `den` gate is a
+    # promise about this generation's predicted density, not the past.
+    f_best = -float("inf") if observed is None else observed
     best_density = -float("inf")
     filtered = 0
     for number in numbers:
@@ -495,12 +545,17 @@ def _select_by_ei(numbers, table, params):
             continue
         if math.isfinite(row[_DEN_GP]):
             best_density = max(best_density, row[_DEN_GP])
-        mu, sigma = row[mu_col], row[sigma_col]
-        if not (math.isfinite(mu) and math.isfinite(sigma)):
-            continue
-        f_best = max(f_best, sign * mu)
+        if observed is None:                 # predicted fallback only here
+            mu, sigma = row[mu_col], row[sigma_col]
+            if not (math.isfinite(mu) and math.isfinite(sigma)):
+                continue
+            f_best = max(f_best, sign * mu)
     if filtered > 0:
         console_print(f"  Filtered out {filtered} crystals with residual > 10")
+    if observed is not None:
+        # ``sign * observed`` is the physical value again (sign in {-1, 1}):
+        # the lowest energy for optType 1, the highest density for optType 11.
+        console_print(f"  EI incumbent: observed {target} = {sign * observed:.4f}")
 
     # `den` is a density, so it gates on the predicted density whatever the
     # acquisition target is; -inf means no crystal carries one at all.
@@ -607,7 +662,7 @@ def gp_active_learning(ORG, POP, fitness):
     rows_before = _db_rows(data_dir)
 
     if rows_before >= _MIN_DB_ROWS and table:
-        selected, mode_label, reason, target = _select_by_ei(numbers, table, params)
+        selected, mode_label, reason, target = _select_by_ei(numbers, table, params, data_dir)
         if reason is not None:
             console_print(f"  {reason}; GP training set unchanged")
             return fitness
