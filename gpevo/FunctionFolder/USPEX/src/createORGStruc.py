@@ -19,6 +19,28 @@ from gpevo.matrix import latConverter, det
 from gpevo.log_utils import console_print
 
 
+def check_optType_13(ORG):
+    """Refuse to run optType 13 without the GP step.
+
+    optType 13 optimises the Hilbert-space distance to the training set.  That
+    distance **is** the GP residual — ``CalcFitness_310.m:46-53`` reads
+    ``POPULATION(i).distance``, and only the GP step ever fills it — so without
+    ``1 : gp`` every fitness would silently become NaN.  Fail fast instead.
+    """
+    if int(getattr(ORG, "optType", 1) or 1) != 13:
+        return
+    if int(getattr(ORG, "gp", 0) or 0) != 0:
+        return
+    console_print("optType 13 optimises `distance` (Hilbert-space distance to the")
+    console_print("training set), which is the residual returned by the GP step.")
+    console_print("Without `1 : gp` no structure ever gets a distance, so every")
+    console_print("fitness would be NaN. The program is STOPS here........")
+    raise RuntimeError(
+        "optType 13 requires the GP step: set `1 : gp` in INPUT.txt "
+        "(and make sure its training data directory is usable)."
+    )
+
+
 def createORGStruc(inputFile="INPUT.txt"):
     ORG = createORGDefault()
     G["ORG_STRUC"] = ORG
@@ -53,6 +75,8 @@ def createORGStruc(inputFile="INPUT.txt"):
             raise RuntimeError("Missing MOL_* files; copy the test MOL_* files into the run directory.")
 
     createORG_Fingerprint(inputFile)
+
+    check_optType_13(ORG)
 
     # Latticevalues
     p = InputParser(inputFile)

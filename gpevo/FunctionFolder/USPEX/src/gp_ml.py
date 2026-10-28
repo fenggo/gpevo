@@ -256,6 +256,10 @@ def apply_gp_metrics(s, result):
     """
     if not isinstance(result, dict):
         return False
+    # ``residual`` is the Hilbert-space distance to the training set; it is
+    # stored under its own name as well as under ``distance``, which is the
+    # field CalcFitness_310.m:47 looks up for optType 13.
+    s.residual = _finite(result.get("residual"))
     s.distance = _finite(result.get("residual"))
     s.density_gp = _finite(result.get("density_gp"))
     s.uq = _finite(result.get("uncertainty"))
@@ -271,7 +275,8 @@ def apply_gp_metrics(s, result):
 # GP-predicted density with its uncertainty.  The widths (12/10/12/10) match
 # the value columns of WriteGenerationOutput_310._gp_columns.
 GP_OUTPUT_HEADER = (f"{'Enthalpy(GP)':<12s}{'UC':>10s}"
-                    f"{'Density(GP)':>12s}{'UC':>10s}")
+                    f"{'Density(GP)':>12s}{'UC':>10s}"
+                    f"{'Residual':>10s}")
 
 
 def apply_pred_metrics(s, entry):
@@ -283,6 +288,12 @@ def apply_pred_metrics(s, entry):
     """
     if not isinstance(entry, dict):
         return False
+    # pred() returns 'residual' just like gp() does; store it so optType 13
+    # stays usable after the training set has been enlarged.
+    residual = _finite(entry.get("residual"))
+    if not math.isnan(residual):
+        s.residual = residual
+        s.distance = residual
     s.density_gp = _finite(entry.get("density_gp"))
     s.uq = _finite(entry.get("uncertainty"))
     s.energy_gp = _finite(entry.get("energy_pred"))

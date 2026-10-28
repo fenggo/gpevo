@@ -12,10 +12,20 @@ from gpevo.FunctionFolder.USPEX.src.gp_ml import gp_active_learning, gp_enabled
 from .use_gp_density import use_gp_density
 
 
+def _usable(value):
+    """A finite number, i.e. something optType 13 can use as a distance."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(out)
+
+
 def CalcFitness_310():
     ORG = G["ORG_STRUC"]
     POP = G["POP_STRUC"]
     fitness = np.zeros(len(POP.POPULATION), dtype=float)
+    missing_distance = 0
     for i, s in enumerate(POP.POPULATION):
         enthalpy = float(np.asarray(s.Enthalpies)[-1])
         if enthalpy >= 9999:
@@ -37,16 +47,38 @@ def CalcFitness_310():
             density = use_gp_density(s, density)
             factor = (sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))) * sum(ORG.numMols)
             fitness[i] = enthalpy / max(1e-12, factor) - 0.5 * float(density if density is not None else 0.0)
-        elif ORG.optType == 13:
-            dist = getattr(s, "distance", None)
-            if isinstance(dist, (int, float)) and not math.isnan(dist) and not math.isinf(dist):
+        elif ORG.optType == 13:                              # distance to dataset
+            # CalcFitness_310.m:46-53 uses POPULATION(i).distance, which is the
+            # GP residual (Hilbert-space distance to the training set).  It is
+            # stored by apply_gp_metrics / apply_pred_metrics, so read the
+            # dedicated field first and fall back to the MATLAB name.
+            dist = getattr(s, "residual", None)
+            if not _usable(dist):
+                dist = getattr(s, "distance", None)
+            if _usable(dist):
                 fitness[i] = float(dist)
             else:
                 fitness[i] = float("nan")
+                missing_distance += 1
         else:
             # Fallback to enthalpy for not-yet-ported optTypes.
             factor = sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))
             fitness[i] = enthalpy / max(1e-12, factor)
+
+    if ORG.optType == 13 and missing_distance:
+        # .m:53 sets NaN here too, but silently.  Say why, and how to fix it:
+        # the distance IS the GP residual, so the GP step has to run.
+        console_print(
+            f"  ERROR: optType 13 (distance) has no value for "
+            f"{missing_distance}/{len(POP.POPULATION)} structure(s) in "
+            f"generation {int(getattr(POP, 'generation', 0))}; fitness is NaN."
+        )
+        if not gp_enabled(ORG):
+            console_print("         the distance is the GP residual — set `1 : gp` "
+                          "in INPUT.txt to produce it.")
+        else:
+            console_print("         the GP step must complete for these structures "
+                          "before their distance exists.")
 
     if ORG.opt_sign is None:
         ORG.opt_sign = 1

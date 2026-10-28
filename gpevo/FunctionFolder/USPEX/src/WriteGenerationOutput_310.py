@@ -129,7 +129,7 @@ def _individual_id(s, fallback):
 
 
 def _gp_columns(s):
-    """``Enthalpy(GP) UC Density(GP) UC`` block for one structure (44 chars).
+    """``Enthalpy(GP) UC Density(GP) UC Residual`` block for one structure (54 chars).
 
     ``s.gp`` is the dict ``uspexkit.gp()`` returned, stored by submitJob when
     the GP step ran in-process.  The individual fields are the fallback for
@@ -156,8 +156,21 @@ def _gp_columns(s):
             except (TypeError, ValueError):
                 pass
     if not all(np.isfinite(v) for v in values):
-        return " " * 44
-    return f"{values[0]:12.3f}{values[1]:10.4f}{values[2]:12.3f}{values[3]:10.4f}"
+        return " " * 54
+    # Residual = Hilbert-space distance to the training set (optType 13's
+    # objective).  Left blank when the GP step did not report one.
+    residual = float("nan")
+    for name in ("residual", "distance"):
+        try:
+            candidate = float(getattr(s, name, None))
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(candidate):
+            residual = candidate
+            break
+    res_s = f"{residual:10.4f}" if np.isfinite(residual) else " " * 10
+    return (f"{values[0]:12.3f}{values[1]:10.4f}{values[2]:12.3f}"
+            f"{values[3]:10.4f}{res_s}")
 
 
 def output_table_header(gp=0):
@@ -185,7 +198,7 @@ def output_table_header(gp=0):
          " ")               # 68     gap before the GP columns
     if gp:
         from gpevo.FunctionFolder.USPEX.src.gp_ml import GP_OUTPUT_HEADER
-        h += GP_OUTPUT_HEADER       # 69-112, same 12/10/12/10 split as the data
+        h += GP_OUTPUT_HEADER       # 69-122, same 12/10/12/10/10 split as the data
     return h
 
 

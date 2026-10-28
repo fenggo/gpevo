@@ -33,7 +33,7 @@ def _load_gp_metrics(s, ORG):
     Columns: 2 residual, 5 density_gp, 6 uncertainty, 8 energy_pred,
     9 uncertainty_eng.
     """
-    for field in ("distance", "density_gp", "uq", "energy_gp", "uq_eng"):
+    for field in ("residual", "distance", "density_gp", "uq", "energy_gp", "uq_eng"):
         if not hasattr(s, field):
             setattr(s, field, float("nan"))
     if all(math.isfinite(float(getattr(s, field))) for field in
@@ -60,6 +60,7 @@ def _load_gp_metrics(s, ORG):
                     continue
                 matched = row
             if matched is not None:
+                s.residual = _float_or_nan(matched[2])
                 s.distance = _float_or_nan(matched[2])
                 s.density_gp = _float_or_nan(matched[5])
                 s.uq = _float_or_nan(matched[6])
