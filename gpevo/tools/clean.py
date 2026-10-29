@@ -10,7 +10,9 @@ Rules, in one place instead of three slightly different copies:
 * directories   ``AntiSeeds``, ``CalcFold*`` (every one of them, not just
   ``CalcFold1``) and the per-structure ``results*/<ID>`` scratch folders;
 * files         ``*.pkl``, ``*.mat``, ``*.backup``, plus the state files
-  ``still_running``, ``USPEX_IS_DONE``, ``octave-workspace``, ``Warnings``.
+  ``still_running``, ``USPEX_IS_DONE``, ``octave-workspace``, ``Warnings`` and
+  the ``ei.log`` of the GP selection -- it is appended to, so a new run would
+  otherwise report the crystals an earlier one labelled.
 
 ``--all`` additionally removes ``results*/``.  Nothing else is ever touched:
 ``Specific``, ``Seeds``, ``INPUT.txt``, ``MOL_*`` and the GP data directory are
@@ -23,7 +25,11 @@ import os
 import shutil
 
 # Deleted by a plain `gpevo clean`.
-_STATE_FILES = ("still_running", "USPEX_IS_DONE", "octave-workspace", "Warnings")
+# ``ei.log`` is appended to by every generation that labels something, so it
+# belongs with the other per-run state: leaving it behind mixes the selections
+# of two runs in one file.
+_STATE_FILES = ("still_running", "USPEX_IS_DONE", "octave-workspace", "Warnings",
+                "ei.log")
 _FILE_PATTERNS = ("*.pkl", "*.mat", "*.backup")
 _DIR_PATTERNS = ("AntiSeeds", "CalcFold*")
 

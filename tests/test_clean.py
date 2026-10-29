@@ -45,6 +45,7 @@ def run_dir(tmp_path):
     _touch(os.path.join(root, "still_running"))
     _touch(os.path.join(root, "USPEX_IS_DONE"))
     _touch(os.path.join(root, "Warnings"))
+    _touch(os.path.join(root, "ei.log"), "gen 2:117 177\ngen 3:201 218\n")
     # per-structure scratch of the reference (labelling) runs
     _touch(os.path.join(root, "results1", "7", "siesta.out"))
     _touch(os.path.join(root, "results1", "12", "POSCAR.12"))
@@ -60,7 +61,7 @@ def test_clean_removes_scratch_and_keeps_assets(run_dir, capsys):
 
     for gone in ("CalcFold1", "CalcFoldTemp", "AntiSeeds", "Current_ORG.pkl",
                  "Current_POP.pkl", "leftover.mat", "old.backup",
-                 "still_running", "USPEX_IS_DONE", "Warnings"):
+                 "still_running", "USPEX_IS_DONE", "Warnings", "ei.log"):
         assert not _exists(run_dir, gone), gone
     # the per-structure labelling folders go, everything else in results* stays
     assert not _exists(run_dir, "results1", "7")
@@ -89,6 +90,7 @@ def test_dry_run_touches_nothing(run_dir, capsys):
     assert removed > 0
     assert _exists(run_dir, "CalcFold1")
     assert _exists(run_dir, "Current_ORG.pkl")
+    assert _exists(run_dir, "ei.log")
     out = capsys.readouterr().out
     assert "would remove" in out
     assert "would be removed" in out

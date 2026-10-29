@@ -292,7 +292,7 @@ gpevo ei-report -p DIR --out PREFIX --trials 300
 
 真实运行上它直接回答"EI 到底有没有用"：某个 TNT·CL-20 运行（14 代、690 结构、26 个标签）上，EI 第 1 个标签就到 1.918、第 4 个到 1.94，随机基线要到第 ~8 个标签才追平，最终 1.9470 对随机的 90 分位 1.9460。
 
-`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings` 这些状态文件。
+`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings`、`ei.log` 这些状态文件（`ei.log` 是追加写的，留着会把两轮运行选中的晶体混在一个文件里，`gpevo ei-report` 也会一起画进去）。
 
 永远不删：`Specific/`、`Seeds/`、`INPUT.txt`、`MOL_*`、`results*/`（除 `-a`）、GP 训练数据目录 `<data>/`。目录里既没有 `INPUT.txt` 也没有 `CalcFold*` 时会拒绝执行，确认无误再加 `-f`。
 
