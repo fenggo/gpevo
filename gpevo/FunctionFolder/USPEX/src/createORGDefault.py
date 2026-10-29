@@ -65,6 +65,7 @@ def createORGDefault():
     ORG.gpK = 1             # top-K crystals selected per generation
     ORG.gpMode = "ei"       # ei | random | uncertainty
     ORG.gpNboot = 2         # structures labelled to seed an empty training set
+    ORG.gpExplore = 1       # 0 drops the sigma*phi(Z) term of EI: no exploration
     ORG.opt_sign = 1
     ORG.dimension = 3
     ORG.molecule = 0

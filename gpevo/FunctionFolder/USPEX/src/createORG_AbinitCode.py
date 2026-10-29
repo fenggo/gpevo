@@ -13,7 +13,8 @@ from gpevo.inputparser import InputParser, scannum, strip_comment
 from gpevo.FunctionFolder.USPEX.src.gp_ml import csv_rows
 
 # Options of the GP block; `gp` is the switch, the rest only matter when it is on.
-_GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot")
+_GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot",
+               "cache", "explore")
 
 
 def _nonempty_block(lines):
@@ -228,6 +229,12 @@ def createORG_AbinitCode(inputFile):
     if raw is not None:
         try:
             ORG.gpCache = 1 if int(float(raw)) != 0 else 0
+        except ValueError:
+            pass
+    raw = p.option("explore")
+    if raw is not None:
+        try:
+            ORG.gpExplore = 1 if int(float(raw)) != 0 else 0
         except ValueError:
             pass
 

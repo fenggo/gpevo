@@ -11,6 +11,7 @@ absolute paths and would be scribbled on.
 """
 from __future__ import annotations
 
+import math
 import os
 
 import numpy as np
@@ -546,6 +547,93 @@ def test_gp_db_ready_needs_two_rows(run):
     assert not gp_db_ready(org)          # a single row breaks uspexkit's data[:, 1:]
     _add_rows(data_dir, 1, start=1)
     assert gp_db_ready(org)
+
+
+def test_explore_off_drops_only_the_sigma_term():
+    """EI with and without sigma*phi(Z); the improvement term is untouched."""
+    mu, sigma, f_best = 1.82, 0.50, 1.90
+    diff = mu - f_best
+    z = diff / sigma
+    phi_z = 0.5 * math.erfc(-z / math.sqrt(2.0))
+    pdf_z = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+
+    assert gp_ml._expected_improvement(mu, sigma, f_best) == pytest.approx(
+        diff * phi_z + sigma * pdf_z)
+    assert gp_ml._expected_improvement(mu, sigma, f_best, explore=False) \
+        == pytest.approx(diff * phi_z)
+
+
+def test_exploration_term_lets_a_bad_crystal_win(run, monkeypatch):
+    """The reason `explore : 0` exists.
+
+    Crystal 11 is predicted *worse* than the observed incumbent (1.82 < 1.9)
+    but its posterior is ten times wider: sigma*phi(Z) = 0.197 against an
+    improvement term of -0.035, so it outranks a crystal that is genuinely
+    better.  That is an expensive reference calculation spent on junk.
+    """
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)                  # observed incumbent density = 1.9
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.82, sigma=0.50),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(_org(home, res_folder, k=1, mode="ei"), population,
+                       np.array([-1.0, -1.0]))
+
+    assert fake.ids_of("calc") == ["11"]
+
+
+def test_explore_off_ranks_by_the_improvement_term(run, monkeypatch):
+    """`explore : 0`: the wide-but-worse crystal loses to the better one."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.82, sigma=0.50),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    org = _org(home, res_folder, k=1, mode="ei")
+    org.gpExplore = 0
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    assert fake.ids_of("calc") == ["12"]
+
+
+def test_explore_is_parsed_from_input(tmp_path):
+    from gpevo.runtime import G
+    from gpevo.FunctionFolder.USPEX.src.createORG_AbinitCode import createORG_AbinitCode
+    from gpevo.FunctionFolder.USPEX.src.createORGDefault import createORGDefault
+
+    input_file = tmp_path / "INPUT.txt"
+    input_file.write_text("1 : gp\n0 : explore\n")
+    G["ORG_STRUC"] = createORGDefault()
+    G["ORG_STRUC"].homePath = str(tmp_path)
+
+    createORG_AbinitCode(str(input_file))
+
+    assert G["ORG_STRUC"].gpExplore == 0
+    assert gp_ml.parse_gp_params(G["ORG_STRUC"])["explore"] is False
+
+
+def test_explore_defaults_to_on(tmp_path):
+    from gpevo.runtime import G
+    from gpevo.FunctionFolder.USPEX.src.createORG_AbinitCode import createORG_AbinitCode
+    from gpevo.FunctionFolder.USPEX.src.createORGDefault import createORGDefault
+
+    input_file = tmp_path / "INPUT.txt"
+    input_file.write_text("1 : gp\n")
+    G["ORG_STRUC"] = createORGDefault()
+    G["ORG_STRUC"].homePath = str(tmp_path)
+
+    createORG_AbinitCode(str(input_file))
+
+    assert G["ORG_STRUC"].gpExplore == 1
+    assert gp_ml.parse_gp_params(G["ORG_STRUC"])["explore"] is True
 
 
 def test_nboot_is_parsed_from_input(tmp_path):

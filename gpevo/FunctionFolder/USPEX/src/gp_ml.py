@@ -378,7 +378,8 @@ def parse_gp_params(ORG):
     """Active-learning parameters from the GP options of INPUT.txt.
 
     Port of CalcFitness_310.m:123-177.  Options: ``1 : gp``, ``24 : ncpu``,
-    ``data : <dir>``, ``den : <density>``, ``u``, ``k``, ``mode``.
+    ``data : <dir>``, ``den : <density>``, ``u``, ``k``, ``mode``, ``nboot``,
+    ``cache`` and ``explore``.
     """
     return {
         "ncpu": _ncpu(ORG),
@@ -387,6 +388,11 @@ def parse_gp_params(ORG):
         "u": float(_opt(ORG, "gpU", _EI_DEFAULTS["u"])),
         "k": int(_opt(ORG, "gpK", _EI_DEFAULTS["k"])),
         "mode": str(_opt(ORG, "gpMode", _EI_DEFAULTS["mode"])),
+        # The sigma*phi(Z) term of EI.  On (the default) it explores, which is
+        # what makes the acquisition an *expected improvement* at all; off it
+        # ranks purely by the improvement term, so a wide posterior on a bad
+        # crystal can no longer buy it a label.
+        "explore": int(_opt(ORG, "gpExplore", 1) or 0) != 0,
         # Structures labelled to seed an empty database; two is the minimum:
         # uspexkit indexes the training array as data[:, 1:], which raises on
         # a single row.
@@ -460,13 +466,24 @@ def _mol_factor(ORG, s):
     return factor if factor > 0 else 1.0
 
 
-def _expected_improvement(mu, sigma, f_best):
-    """EI for maximisation: (mu-f_best)*Phi(Z) + sigma*phi(Z)."""
+def _expected_improvement(mu, sigma, f_best, explore=True):
+    """EI for maximisation: (mu-f_best)*Phi(Z) + sigma*phi(Z).
+
+    With ``explore`` off the second term is dropped.  That term is the only
+    part that rewards a crystal for being *unknown*: a structure the GP has
+    never seen anything like carries a wide posterior, so sigma*phi(Z) can
+    outrank the improvement term even when mu is far worse than the
+    incumbent -- which is how low-quality crystals get sent to an expensive
+    reference calculation.  What is left is pure exploitation, the expected
+    size of the improvement weighted by the probability of improving at all.
+    """
     diff = mu - f_best
     if sigma < 1e-10:
         return max(0.0, diff)
     z = diff / sigma
     phi_z = 0.5 * math.erfc(-z / math.sqrt(2.0))
+    if not explore:
+        return diff * phi_z
     pdf_z = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
     return diff * phi_z + sigma * pdf_z
 
@@ -600,6 +617,7 @@ def _select_by_ei(numbers, table, params, data_dir=None):
         return [], "", (f"density threshold gate: best density="
                         f"{best_density:.4f} < den={params['den']:.4f}"), target
 
+    explore = bool(params.get("explore", True))
     # Step 1: EI of every valid crystal
     ei_list, crystal_list, uncert_list, mu_list = [], [], [], []
     for number in numbers:
@@ -609,7 +627,7 @@ def _select_by_ei(numbers, table, params, data_dir=None):
         mu, sigma = row[mu_col], row[sigma_col]
         if not (math.isfinite(mu) and math.isfinite(sigma)):
             continue
-        ei_list.append(_expected_improvement(sign * mu, sigma, f_best))
+        ei_list.append(_expected_improvement(sign * mu, sigma, f_best, explore))
         crystal_list.append(number)
         uncert_list.append(sigma)
         mu_list.append(mu)
@@ -619,6 +637,7 @@ def _select_by_ei(numbers, table, params, data_dir=None):
     # Step 2: select top-K
     n_sel = min(int(params["k"]), len(ei_list))
     mode = str(params["mode"])
+    ei_label = "EI" if explore else "EI (no exploration)"
     if mode == "uncertainty":
         order = sorted(range(len(ei_list)), key=lambda i: -uncert_list[i])
         mode_label = "uncertainty"
@@ -628,11 +647,11 @@ def _select_by_ei(numbers, table, params, data_dir=None):
         mode_label = "random"
     elif mode == "ei":
         order = sorted(range(len(ei_list)), key=lambda i: -ei_list[i])
-        mode_label = "EI"
+        mode_label = ei_label
     else:
         console_print(f"  Unknown select_mode \"{mode}\", falling back to EI")
         order = sorted(range(len(ei_list)), key=lambda i: -ei_list[i])
-        mode_label = "EI"
+        mode_label = ei_label
 
     candidates = [(crystal_list[i], uncert_list[i], mu_list[i], ei_list[i])
                   for i in order[:n_sel]]
