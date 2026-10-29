@@ -18,11 +18,19 @@ We propose a UQ-driven active learning strategy that closes the loop between GP 
 
 ### 2.1 Gaussian Process Regression
 
-The GP model employs a composite kernel combining a DotProduct kernel (capturing linear trends), a Matern kernel with $\nu = 1.5$ (capturing smooth non-linear variations), and a WhiteKernel (accounting for noise):
+Two GPR surrogates are trained on the same descriptors: one for the density and one for the energy. Each employs a composite kernel combining a DotProduct kernel (capturing linear trends and second-order couplings), a stationary core (capturing smooth non-linear variation), and a WhiteKernel (accounting for noise):
 
-$$k(\mathbf{x}_i, \mathbf{x}_j) = k_{\text{DotProduct}}(\mathbf{x}_i, \mathbf{x}_j) + k_{\text{Matern}_{3/2}}(\mathbf{x}_i, \mathbf{x}_j) + k_{\text{White}}(\mathbf{x}_i, \mathbf{x}_j)$$
+$$
+k(\mathbf{x}_i, \mathbf{x}_j) = 0.00581^2 \, k_{\text{DotProduct}}(\mathbf{x}_i, \mathbf{x}_j)
+\;+\; 0.35^2 \, k_{\text{core}}(\mathbf{x}_i, \mathbf{x}_j)
+\;+\; k_{\text{White}}(\mathbf{x}_i, \mathbf{x}_j)
+$$
 
-The feature vector $\mathbf{x} \in \mathbb{R}^7$ encodes seven structural descriptors derived from ReaxFF-based energy decomposition and hydrogen-bond network analysis. The GP is trained on a dataset of $N$ known structures with DFT-computed densities and energies.
+The core is a Matérn kernel with $\nu = 5/2$ for **density**, and an RBF kernel for **energy**: the DFT energy surface of same-composition polymorphs is smoother than $\nu = 5/2$ assumes, and leave-one-out favoured RBF (RMSE 0.233 vs 0.254 eV, $R^2$ 0.821 vs 0.788). Both cores carry ARD length scales, one per descriptor, initialised to 0.1 and fitted with `n_restarts_optimizer=10`, `normalize_y=True` and `random_state=0` (see `uspexkit/core.py:586-607`).
+
+The feature vector $\mathbf{x} \in \mathbb{R}^{10}$ encodes ten cheap ReaxFF descriptors — total, bond, angle, torsion and van der Waals energies ($e_{\text{tot}}, e_{\text{bond}}, e_{\text{ang}}, e_{\text{tor}}, e_{\text{vdW}}$), three hydrogen-bond terms distinguished by the acceptor atom ($e_{\text{hb}}^{\text{CHO}}, e_{\text{hb}}^{\text{CHN}}, e_{\text{hb}}^{\text{CHC}}$), the Coulomb energy $e_{\text{coul}}$ and the ReaxFF density. They are standardised before fitting (`uspexkit/core.py:702-711`).
+
+The targets are the corresponding DFT quantities stored in a parallel file, so each surrogate learns a correction to the cheap model rather than the property itself ($\Delta$-learning): the density model regresses the DFT density, the energy model the DFT energy. Both are trained on the same $N$ structures that have been labelled so far.
 
 ### 2.2 UQ-Driven Active Learning Cycle
 
