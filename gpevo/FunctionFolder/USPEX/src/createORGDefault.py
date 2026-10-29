@@ -100,6 +100,9 @@ def createORGDefault():
     # Rigid-body swarm move (`fracSwarm : ...`): 0 disables it, so the default
     # operator mix is unchanged.  Its offspring are produced *in addition* to
     # populationSize, like the elitist additions.
+    # `cache : 0` makes pred() recompute every 10-D feature instead of reusing
+    # the one the GP step already computed (1 = reuse, the default).
+    ORG.gpCache = 1
     ORG.fracSwarm = 0.0
     ORG.howManySwarm = 0
     ORG.swarmStep = 0.5          # fraction of the displacement toward the best

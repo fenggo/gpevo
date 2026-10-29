@@ -329,6 +329,178 @@ def test_missing_reference_run_never_retrains(run, monkeypatch, capsys):
 
 
 # ────────────────────────────────────────────────────────────────────
+#  learning curve
+# ────────────────────────────────────────────────────────────────────
+
+def test_pred_receives_the_features_the_gp_step_computed(run, monkeypatch):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    # what submitJob stores after each structure's GP step
+    for number, s in zip([11, 12], population.POPULATION):
+        gp_ml.apply_gp_metrics(s, {"residual": 1.0, "density_gp": s.density_gp,
+                                   "uncertainty": 0.05, "energy_pred": -100.0,
+                                   "uncertainty_eng": 0.1,
+                                   "feature": [float(number)] * 10})
+    org = _org(home, res_folder, k=1)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    pred_calls = [c for c in fake.calls if c[0] == "pred"]
+    features = pred_calls[0][2]["features"]
+    assert sorted(features) == [11, 12]
+    assert features[11] == [11.0] * 10
+
+
+def test_feature_cache_is_switched_off_by_input(run, monkeypatch):
+    """`0 : cache` in INPUT.txt must fall back to recomputing."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    for s in population.POPULATION:
+        gp_ml.apply_gp_metrics(s, {"residual": 1.0, "density_gp": s.density_gp,
+                                   "uncertainty": 0.05, "energy_pred": -100.0,
+                                   "uncertainty_eng": 0.1,
+                                   "feature": [1.0] * 10})
+    org = _org(home, res_folder, k=1)
+    org.gpCache = 0
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    pred_calls = [c for c in fake.calls if c[0] == "pred"]
+    assert pred_calls[0][2]["features"] is None
+
+
+def test_loo_rmses_reads_the_models_uspexkit_cached(tmp_path):
+    """End to end: fit like uspexkit does, then score that very pickle."""
+    from gpevo.uspexkit import core
+
+    data_dir = str(tmp_path / "data")
+    os.makedirs(data_dir, exist_ok=True)
+    rng = np.random.default_rng(3)
+    features = rng.normal(size=(8, 10))
+    density = 1.8 + 0.05 * rng.normal(size=8)
+    energy = -28000.0 + 3.0 * rng.normal(size=8)
+    for name, mat in (("feature_mlp.csv", np.column_stack([np.arange(8), features])),
+                      ("feature.csv", np.column_stack(
+                          [np.arange(8), energy, features[:, 1:9], density]))):
+        np.savetxt(os.path.join(data_dir, name), mat, delimiter=",",
+                   header=_HEADER, comments="", fmt="%.6f")
+
+    previous = os.getcwd()
+    try:
+        os.chdir(data_dir)
+        core.load_gaussian_process(features, density, energy)
+    finally:
+        os.chdir(previous)
+
+    rmses = gp_ml._loo_rmses(data_dir)
+    assert rmses is not None
+    assert rmses[0] == pytest.approx(0.05, abs=0.05)     # density, g/cm^3
+    assert rmses[1] == pytest.approx(3.0, abs=3.0)       # energy, eV
+    # a directory without the models reports nothing instead of raising
+    assert gp_ml._loo_rmses(str(tmp_path)) is None
+
+
+def test_learning_curve_reports_the_row_delta(run, monkeypatch, capsys):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = _population_with_predictions([11, 12], [1.9, 1.95])
+    org = _org(home, res_folder, k=1)
+    monkeypatch.setattr(gp_ml, "_call", _FakeCalls())
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    out = capsys.readouterr().out
+    assert "GP learning curve (gen 2): rows 4 -> 5 (+1)" in out
+    assert "LOO RMSE" in out
+
+
+def test_learning_curve_is_printed_when_a_gate_blocks(run, monkeypatch, capsys):
+    """A generation that labels nothing must still say so: rows 4 -> 4 (+0)."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = _population_with_predictions([11, 12], [1.5, 1.6])
+    org = _org(home, res_folder, den=1.8)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    assert fake.calls == []
+    assert "rows 4 -> 4 (+0)" in capsys.readouterr().out
+
+
+def _bruteforce_loo(X, y, normalize_y):
+    """Refit without every point in turn: the slow reference for _loo_rmse."""
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+
+    kernel = 1.0 * RBF(length_scale=[1.0] * X.shape[1]) + WhiteKernel(noise_level=1e-3)
+
+    # optimizer=None pins the kernel: the identity holds for a fixed kernel,
+    # and re-optimising each fold would measure the optimiser, not the formula.
+    def fit(X_, y_):
+        return GaussianProcessRegressor(kernel=kernel, normalize_y=normalize_y,
+                                        optimizer=None, random_state=0).fit(X_, y_)
+
+    errors = []
+    for i in range(len(y)):
+        keep = np.ones(len(y), dtype=bool)
+        keep[i] = False
+        errors.append(y[i] - float(fit(X[keep], y[keep]).predict(X[i:i + 1])[0]))
+    return float(np.sqrt(np.mean(np.square(errors))))
+
+
+def test_loo_rmse_matches_a_bruteforce_leave_one_out():
+    """The hat-matrix shortcut must equal refitting without each point."""
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(8, 3))
+    y = 2.0 * np.sin(X[:, 0]) + 0.3 * X[:, 1]
+    kernel = 1.0 * RBF(length_scale=[1.0] * 3) + WhiteKernel(noise_level=1e-3)
+    gpr = GaussianProcessRegressor(kernel=kernel, normalize_y=False,
+                                   optimizer=None, random_state=0).fit(X, y)
+
+    assert gp_ml._loo_rmse(gpr) == pytest.approx(
+        _bruteforce_loo(X, y, normalize_y=False), rel=1e-6)
+
+
+def test_loo_rmse_of_a_normalised_model_is_close_to_the_refit_reference():
+    """Production models use normalize_y=True; the two then differ slightly.
+
+    Refitting each fold re-centres the target with that fold's own mean, so it
+    scores a different model than the one fitted on all rows.  The shortcut
+    keeps the full-set centring, which is what is being reported.
+    """
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(8, 3))
+    y = 2.0 * np.sin(X[:, 0]) + 0.3 * X[:, 1]
+    kernel = 1.0 * RBF(length_scale=[1.0] * 3) + WhiteKernel(noise_level=1e-3)
+    gpr = GaussianProcessRegressor(kernel=kernel, normalize_y=True,
+                                   optimizer=None, random_state=0).fit(X, y)
+
+    reference = _bruteforce_loo(X, y, normalize_y=True)
+    assert gp_ml._loo_rmse(gpr) == pytest.approx(reference, rel=0.15)
+    assert gp_ml._loo_rmse(gpr) != pytest.approx(reference, rel=1e-3)
+
+
+# ────────────────────────────────────────────────────────────────────
 #  helpers
 # ────────────────────────────────────────────────────────────────────
 

@@ -131,6 +131,13 @@ data11_22 : data          % 训练数据目录（已有则直接用于 gp() 训�
 2         : k             % 每代 EI top-K 个数
 ei        : mode          % ei | random | uncertainty
 2         : nboot         % 训练集为空时首批打标签的结构数（默认 2，需 ≥2）
+1         : cache         % 1（默认）= pred 复用 GP 步已算出的 10 维特征；0 = 每个晶体重算
+```
+
+`cache : 1` 省掉的是每代每个晶体 1 次 ReaxFF 重优化 + 4 次 GULP（特征计算）。前提是 GP 步读的 `gulp.cif` 与 `Individuals.traj` 帧是**同一个弛豫后的结构**（`WriteIndividualsTraj` 写的就是 `s.COORDINATES`），所以复用不会换结构，只是不再重新走一遍极小化。日志会打出实际复用个数：
+
+```
+  pred: reusing the GP-step feature for 132/134 crystal(s), skipping their ReaxFF re-optimisation
 ```
 
 > 若 `gp` 一行因写法问题没被读入（例如关键字被注释污染），开关会**静默**保持 0——整条 GP 链都不发生。启动时会打印告警列出有问题的行。
@@ -157,6 +164,14 @@ EI 用哪个量做采集函数，由 `optType` 决定：
   GP training set has only 0 labelled row(s) in /home/feng/tnt/data_exp: seeding it with the best structures of generation 1
   GP training set: 0 -> 2 rows; dropped 3 cached model(s)
 ```
+
+每代结束还会打一行学习曲线，**这一行是判断"学习到底有没有在发生"的依据**（被门挡住、一个标签都没打时是 `+0`）：
+
+```
+  GP learning curve (gen 3): rows 216 -> 220 (+4)  LOO RMSE density=0.0312 g/cm^3  energy=0.4123 eV
+```
+
+`LOO RMSE` 用帽子矩阵恒等式从已拟合模型的 Cholesky 因子直接算（Rasmussen & Williams 5.12，无需重拟合），超参是全程数据上拟合的那套，所以偏乐观一点；库超过 2000 行或找不到 uspexkit 缓存的模型时显示 `n/a`。
 
 没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
 

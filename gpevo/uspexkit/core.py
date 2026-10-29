@@ -195,7 +195,8 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
  
     data   = np.loadtxt('../{:s}/feature_mlp.csv'.format(dat),delimiter=',',skiprows=1)  ## get crystal feature data
     data_  = np.loadtxt('../{:s}/feature.csv'.format(dat),delimiter=',',skiprows=1)      ## get crystal feature data
-    images = Trajectory('../{:s}/structures.traj'.format(dat))
+    # The database trajectory used to be read here too; nothing below uses it,
+    # so a per-structure call no longer pays for it.
     d      = data[:,1:]    # 去掉索引
     # f==2 只对查询 feature 做 nmol 平均, 训练数据 d 保持原始总能量不动
 
@@ -362,6 +363,9 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     # have to re-parse the file (column order identical to the csv row).
     return {
         'id': id_,
+        # The 10-D query feature, so a caller that needs it again (pred() after
+        # the training set grew) can reuse it instead of re-running ReaxFF.
+        'feature': [float(value) for value in feature],
         'nearest': int(imin),
         'residual': float(res[imin]),
         'density_min': float(data_[imin][-1]),
@@ -450,7 +454,8 @@ def fixbroken(broken=1.5,dat='data',scale=1.2,ncpu=1):
 
     data   = np.loadtxt('../{:s}/feature_mlp.csv'.format(dat),delimiter=',',skiprows=1)  ## get crystal feature data
     data_  = np.loadtxt('../{:s}/feature.csv'.format(dat),delimiter=',',skiprows=1)      ## get crystal feature data
-    images = Trajectory('../{:s}/structures.traj'.format(dat))
+    # The database trajectory used to be read here too; nothing below uses it,
+    # so a per-structure call no longer pays for it.
     d      = data[:,1:]    # 去掉索引
 
     ### prepare data 
@@ -633,7 +638,7 @@ def load_rfr(X, y):
 # ──────────────────────────────────────────────
 
 def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
-         c='nn',step=300, ncpu=8, dat="data", tolerance=0.001):
+         c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None):
     """
     Predict density and energy using Gaussian Process + MLP + RandomForest.
 
@@ -648,6 +653,10 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
         ncpu: number of CPUs
         dat: data directory name
         tolerance: structure matching tolerance
+        features: optional ``{crystal id: 10-D feature}`` already computed for
+            these very structures (the GP step of this generation).  A crystal
+            found here skips the ReaxFF re-optimisation and its four GULP runs;
+            the geometry is the relaxed one the trajectory holds either way.
     """
     if g is not None:
        atoms  = read(g,index=x)
@@ -675,62 +684,76 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     # Collected per crystal and returned, so callers (gpevo) can store the
     # predictions on the structure instead of re-parsing density_predict.log.
     results = {}
+    if not ids_list:
+        return results
+
+    # The database and the fitted models are the same for every crystal of one
+    # call, so they are read once here.  They used to be read inside the loop:
+    # both csv files, the whole structures.traj (whose handle was never used)
+    # and the model pickles were reloaded once per crystal.
+    dir_list = root_dir.split("/")
+    rootdir = "/".join(dir_list[:-1])
+    if exists(f"{root_dir}/{dat}"):
+       data_dir = f"{root_dir}/{dat}"
+    else:
+       data_dir = f"{rootdir}/{dat}"
+    chdir(data_dir)
+    assert exists("structures.traj"), "Error, datafile not found in data directory!"
+    data  = np.loadtxt("feature_mlp.csv", delimiter=",", skiprows=1)
+    data_ = np.loadtxt("feature.csv", delimiter=",", skiprows=1)
+    # f==2 只对查询 feature 做 nmol 平均, 训练数据 X_raw 保持原始总能量不动
+    X_raw = data[:, 1:]
+    D     = X_raw
+    y     = data_[:, -1]
+    y_eng = data_[:, 1]
+    scaler = preprocessing.StandardScaler().fit(X_raw)
+    X      = scaler.transform(X_raw)
+    gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
+    rfr = load_rfr(X, y)
+    chdir(root_dir)
+
     for s in ids_list:
-        dir_list = root_dir.split("/")
-        rootdir = "/".join(dir_list[:-1])
-        if exists(f"{root_dir}/{dat}"):
-           data_dir = f"{root_dir}/{dat}"
-        else:
-           data_dir = f"{rootdir}/{dat}"
         # print(images,s)
         atoms = images[s - 1]
 
         chdir(data_dir)
-        if c=='nn':
-           # atoms_mlp, e, density = get_gulp_energy(atoms, ncpu=ncpu)
-           atoms_mlp = opt(atoms=atoms,step=step,l=1,t=0.000001,n=ncpu, lib='reaxff_nn')
-        elif c=='mtp':
-           # atoms_mlp, e, density = get_gulp_energy(atoms, ncpu=ncpu)
-           atoms_mlp = lammps_opt_mtp(atoms=atoms,step=step,n=ncpu,lib='pot.almtp')
+        cached = features.get(s) if features else None
+        if cached is not None:
+            # The GP step of this generation already computed this feature from
+            # the same relaxed geometry; re-running ReaxFF would only re-walk
+            # the minimiser to the same local minimum.
+            atoms_mlp = atoms
+            volume  = atoms_mlp.get_volume()
+            density = masses / volume / 0.602214129
+            feature = np.asarray(cached, dtype=float)
         else:
-           raise RuntimeError("Caluclator not supported!") 
+            if c=='nn':
+               # atoms_mlp, e, density = get_gulp_energy(atoms, ncpu=ncpu)
+               atoms_mlp = opt(atoms=atoms,step=step,l=1,t=0.000001,n=ncpu, lib='reaxff_nn')
+            elif c=='mtp':
+               # atoms_mlp, e, density = get_gulp_energy(atoms, ncpu=ncpu)
+               atoms_mlp = lammps_opt_mtp(atoms=atoms,step=step,n=ncpu,lib='pot.almtp')
+            else:
+               raise RuntimeError("Caluclator not supported!")
 
-        volume  = atoms_mlp.get_volume()
-        density = masses / volume / 0.602214129
-        e       = get_feature(atoms_mlp,n=ncpu,lib='reaxff_nn')
-        e_cho   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core O core')
-        e_chn   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core N core')
-        e_chc   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core C core')
-        
-        # if f == 1:
-        if f==1:
-            feature = np.array([e[0],e[1],e[5],e[8],e[10],e_cho[11],e_chn[11],e_chc[11],e[12],density])
-        elif f==2:
-            nmol = get_nmol(atoms)
-            feature = np.array([e[0],e[1],e[5],e[8],e[10],e_cho[11],e_chn[11],e_chc[11],e[12],density], dtype=float)
-            feature[:-1] /= nmol      # 能量项按分子数平均, 密度不变
-        else:
-            feature = np.array([e[0],e[5],e[8],e[10],e[11],e[12],density])
+            volume  = atoms_mlp.get_volume()
+            density = masses / volume / 0.602214129
+            e       = get_feature(atoms_mlp,n=ncpu,lib='reaxff_nn')
+            e_cho   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core O core')
+            e_chn   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core N core')
+            e_chc   = get_hbond_feature(atoms_mlp,n=ncpu,elements='H core C core C core')
 
-        assert exists("structures.traj"), "Error, datafile not found in data directory!"
-        data  = np.loadtxt("feature_mlp.csv", delimiter=",", skiprows=1)
-        data_ = np.loadtxt("feature.csv", delimiter=",", skiprows=1)
-        struc = Trajectory('structures.traj')
+            # if f == 1:
+            if f==1:
+                feature = np.array([e[0],e[1],e[5],e[8],e[10],e_cho[11],e_chn[11],e_chc[11],e[12],density])
+            elif f==2:
+                nmol = get_nmol(atoms)
+                feature = np.array([e[0],e[1],e[5],e[8],e[10],e_cho[11],e_chn[11],e_chc[11],e[12],density], dtype=float)
+                feature[:-1] /= nmol      # 能量项按分子数平均, 密度不变
+            else:
+                feature = np.array([e[0],e[5],e[8],e[10],e[11],e[12],density])
 
-        X_raw = data[:, 1:]
-        # f==2 只对查询 feature 做 nmol 平均, 训练数据 X_raw 保持原始总能量不动
-        D = X_raw
-        D_ = data_[:, 1:]
         ind, imin, res_ = search_structure(feature, D, tolerance=tolerance)
-
-        y = data_[:, -1]
-        y_eng = data_[:, 1]
-        scaler = preprocessing.StandardScaler().fit(X_raw)
-        X = scaler.transform(X_raw)
-
-        gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
-        rfr = load_rfr(X, y)
-        # mlp = load_mlp(X, y)
 
         X_ = scaler.transform(np.expand_dims(feature, axis=0))
         density_pred, std_den_pred = gpr_density.predict(X_, return_std=True)

@@ -224,6 +224,12 @@ def createORG_AbinitCode(inputFile):
             ORG.gpNboot = max(0, int(float(raw)))
         except ValueError:
             pass
+    raw = p.option("cache")
+    if raw is not None:
+        try:
+            ORG.gpCache = 1 if int(float(raw)) != 0 else 0
+        except ValueError:
+            pass
 
     if ORG.gp:
         # One extra step after the relaxations.  It repeats the last

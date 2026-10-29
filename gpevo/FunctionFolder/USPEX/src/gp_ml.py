@@ -25,6 +25,7 @@ import csv
 import glob
 import math
 import os
+import pickle
 import random
 import shutil
 
@@ -267,7 +268,43 @@ def apply_gp_metrics(s, result):
     s.energy_gp = _finite(result.get("energy_pred"))
     s.uq_eng = _finite(result.get("uncertainty_eng"))
     s.gp = dict(result)
+    feature = result.get("feature")
+    if isinstance(feature, (list, tuple)) and len(feature) == _FEATURE_LEN:
+        s.gp_feature = [float(value) for value in feature]
+        _cache_feature(getattr(s, "Number", None), s.gp_feature)
     return True
+
+
+# The 10-D query feature gp() computed for each structure of the current
+# generation, keyed by its global id.  The GP step and gp_active_learning run
+# in the same process (SubmitJobs_310 dispatches jobs sequentially), so pred()
+# can reuse them instead of re-running ReaxFF.  Pruned to one generation by
+# gp_active_learning.
+_FEATURE_LEN = 10
+_FEATURE_CACHE = {}
+
+
+def _features_reusable(ORG):
+    """INPUT switch ``cache : 0`` falls back to recomputing every feature."""
+    return int(_opt(ORG, "gpCache", 1) or 0) != 0
+
+
+def _cache_feature(number, feature):
+    """Remember gp()'s feature for *number* (None or NaN entries ignored)."""
+    try:
+        key = int(number)
+    except (TypeError, ValueError):
+        return
+    if key <= 0 or not all(math.isfinite(value) for value in feature):
+        return
+    _FEATURE_CACHE[key] = list(feature)
+
+
+def _prune_feature_cache(numbers):
+    """Drop everything that is not part of the current generation."""
+    keep = set(numbers)
+    for key in [k for k in _FEATURE_CACHE if k not in keep]:
+        del _FEATURE_CACHE[key]
 
 
 # Columns appended after SYMMETRY in the OUTPUT.txt table when `1 : gp` is
@@ -618,6 +655,105 @@ def _below_den(row, den):
     return math.isfinite(density) and density < den
 
 
+# Leave-one-out costs one O(N^3) solve; above this many labelled rows the
+# learning-curve line reports the database size only.
+_LOO_MAX_ROWS = 2000
+
+
+def _loo_rmse(gpr):
+    """Exact leave-one-out RMSE of a fitted GPR, from its own Cholesky factor.
+
+    Rasmussen & Williams eq. 5.12: the LOO residual is ``(K^-1 y)_i / (K^-1)_ii``,
+    so no refit is needed.  ``alpha_`` is in the normalised target when the
+    model was fitted with ``normalize_y=True``, hence the rescale -- the
+    centring stays the one of the full training set, which is the model that
+    is actually being scored (refitting each fold would re-centre it and
+    answer a slightly different question).
+
+    The hyperparameters are the ones fitted on all rows, so this is in-sample
+    for them: expect a mild optimism, not a held-out error.
+    """
+    from scipy.linalg import cho_solve
+
+    n = np.asarray(gpr.alpha_).size
+    k_inv = cho_solve((gpr.L_, True), np.eye(n))
+    resid = np.ravel(gpr.alpha_) / np.diag(k_inv)
+    scale = float(getattr(gpr, "_y_train_std", 1.0) or 1.0)
+    return float(np.sqrt(np.mean((resid * scale) ** 2)))
+
+
+def _cached_models(data_dir):
+    """``(gpr_density, gpr_energy)`` uspexkit left in *data_dir*, else None."""
+    try:
+        from gpevo.uspexkit import core as _core
+    except Exception:
+        return None
+    version = getattr(_core, "_KERNEL_VERSION", None)
+    models = []
+    for name in ("gpr_density.pkl", "gpr_energy.pkl"):
+        path = os.path.join(data_dir, name)
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "rb") as fp:
+                blob = pickle.load(fp)
+        except Exception:
+            return None
+        if not isinstance(blob, dict):
+            return None
+        if version is not None and blob.get("version") != version:
+            return None                  # stale cache: not this model
+        models.append(blob.get("model"))
+    return models if all(models) else None
+
+
+def _loo_rmses(data_dir):
+    """``(density, energy)`` LOO RMSE of the cached models, None when unknown."""
+    try:
+        from sklearn.preprocessing import StandardScaler
+
+        feature = np.loadtxt(os.path.join(data_dir, "feature_mlp.csv"),
+                             delimiter=",", skiprows=1)
+        labels = np.loadtxt(os.path.join(data_dir, "feature.csv"),
+                            delimiter=",", skiprows=1)
+        feature = np.atleast_2d(feature)[:, 1:]
+        labels = np.atleast_2d(labels)
+        rows = min(len(feature), len(labels))
+        if rows < 3 or rows > _LOO_MAX_ROWS:
+            return None
+        models = _cached_models(data_dir)
+        if models is None:
+            return None
+        X = StandardScaler().fit_transform(feature[:rows])
+        return tuple(_loo_rmse(model) for model, _ in
+                     zip(models, (labels[:rows, -1], labels[:rows, 1])))
+    except Exception:
+        return None
+
+
+def _log_learning_curve(ORG, POP, data_dir, rows_before):
+    """One line per generation: is the training set -- and the model -- growing?
+
+    ``rows`` is the only thing the active-learning loop can always report; the
+    LOO RMSE says whether the labels bought anything, and is skipped when
+    uspexkit left no (or a stale) model behind.
+    """
+    try:
+        rows_after = _db_rows(data_dir)
+        generation = int(getattr(POP, "generation", 0))
+        line = (f"  GP learning curve (gen {generation}): rows "
+                f"{rows_before} -> {rows_after} (+{rows_after - rows_before})")
+        rmses = _loo_rmses(data_dir)
+        if rmses is None:
+            line += f"  LOO RMSE: n/a ({rows_after} labelled rows)"
+        else:
+            line += (f"  LOO RMSE density={rmses[0]:.4f} g/cm^3"
+                     f"  energy={rmses[1]:.4f} eV")
+        console_print(line)
+    except Exception:
+        pass                            # a log line must never break a run
+
+
 def gp_active_learning(ORG, POP, fitness):
     """Label a few structures of this generation, then re-predict them.
 
@@ -632,7 +768,23 @@ def gp_active_learning(ORG, POP, fitness):
 
     ``fitness`` comes back unchanged whenever no training row was added; every
     gate that stops the loop says which one it was.
+
+    The work happens in ``_gp_active_learning``; this wrapper only makes sure
+    the learning-curve line is printed on every exit path, including the gates
+    that return early without labelling anything.
     """
+    if not gp_enabled(ORG):
+        return fitness
+    _, _res_folder, data_dir = gp_data_paths(ORG)
+    rows_before = _db_rows(data_dir)
+    try:
+        return _gp_active_learning(ORG, POP, fitness)
+    finally:
+        _log_learning_curve(ORG, POP, data_dir, rows_before)
+
+
+def _gp_active_learning(ORG, POP, fitness):
+    """Body of :func:`gp_active_learning` (see its docstring)."""
     fitness = np.asarray(fitness, dtype=float)
     if not gp_enabled(ORG):
         return fitness
@@ -658,6 +810,9 @@ def gp_active_learning(ORG, POP, fitness):
         return fitness
 
     numbers = [int(getattr(POP.POPULATION[i], "Number", 0)) for i in valid]
+    # Structure ids are global, so everything left in the cache belongs to an
+    # earlier generation: keep the cache at one generation's worth of features.
+    _prune_feature_cache(numbers)
     table = metrics_table(POP, valid, numbers, os.path.join(home, "CalcFold1", "gp.csv"))
     rows_before = _db_rows(data_dir)
 
@@ -756,10 +911,21 @@ def gp_active_learning(ORG, POP, fitness):
     pred_log = os.path.join(res_folder, "density_predict.log")
     if os.path.isfile(pred_log):
         os.remove(pred_log)
+    # Reuse the features the GP step of this generation already computed: the
+    # geometry pred() would re-optimise is the same relaxed one, so this skips
+    # one ReaxFF optimisation and four GULP runs per crystal.
+    features = {}
+    if _features_reusable(ORG):
+        features = {i: _FEATURE_CACHE[i] for i in pred_ids if i in _FEATURE_CACHE}
+        if features:
+            console_print(f"  pred: reusing the GP-step feature for "
+                          f"{len(features)}/{len(pred_ids)} crystal(s), "
+                          f"skipping their ReaxFF re-optimisation")
     console_print(f"  Running: uspexkit.pred(ids='{' '.join(str(i) for i in pred_ids)}')")
     ok, results = _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
                         ncpu=int(params["ncpu"]), den=0.0,
-                        ids=" ".join(str(i) for i in pred_ids), dat=params["dat"])
+                        ids=" ".join(str(i) for i in pred_ids), dat=params["dat"],
+                        features=features or None)
     if not ok or not isinstance(results, dict) or not results:
         console_print("  Warning: uspexkit.pred returned no predictions, "
                       "fitness left unchanged")
