@@ -29,6 +29,95 @@ def _setup_rng(ORG):
     _random.seed(seed)
 
 
+# Attributes a restart must keep from the checkpoint even though INPUT.txt
+# also sets them.  Two groups:
+#   * fixed when the run is initialised -- changing the composition or the
+#     population size mid-run would contradict the population the checkpoint
+#     restores;
+#   * written back by the loop -- latVolume is re-averaged from the population
+#     every generation, firstGeneSplit* carries the composition split, and
+#     update_STUFF zeroes / rebuilds the operator fractions and tournament.
+_RESTART_KEEP = (
+    "dimension", "molecule", "varcomp", "optType", "opt_sign",
+    "populationSize", "numGenerations", "initialPopSize", "numIons", "numMols",
+    "resFolder", "homePath", "specificFolder", "log_file",
+    "latVolume", "tournament", "softMutOnly", "fracTrans", "howManyTrans",
+    "fracPerm", "fracGene", "minAt", "maxAt",
+    "firstGeneSplit", "firstGeneSplitAll",
+    "correlation_coefficient", "cor_dir",
+)
+
+
+def _report_changes(before, ORG, limit=12):
+    """Print the options INPUT.txt actually changed on this restart."""
+    changed = []
+    for name, value in sorted(ORG.items()):
+        if name in _RESTART_KEEP or name not in before:
+            continue
+        old = before[name]
+        if isinstance(value, (int, float, str)) and not isinstance(value, bool) \
+                and isinstance(old, (int, float, str)) and not isinstance(old, bool) \
+                and value != old:
+            changed.append(f"{name}: {old} -> {value}")
+    if not changed:
+        return
+    for line in changed[:limit]:
+        console_print(f"  INPUT.txt (re-read on restart) {line}")
+    if len(changed) > limit:
+        console_print(f"  ... and {len(changed) - limit} more")
+
+
+def _refresh_input_options(input_file="INPUT.txt"):
+    """Re-read INPUT.txt into the ORG a restart just restored.
+
+    A restart loads ``Current_ORG.pkl``, so edits made to INPUT.txt while the
+    run was stopped were silently ignored -- only the fingerprint block used
+    to be re-parsed.  The option parsers are pure (they only set attributes on
+    ``G["ORG_STRUC"]``), so running them again on the restored ORG refreshes
+    everything tunable, the GP block included, while *_RESTART_KEEP* stays as
+    the checkpoint had it.
+
+    A parse failure must not kill a calculation that is already running, so
+    the checkpoint is put back and the restart continues with it.
+    """
+    import copy
+
+    ORG = G["ORG_STRUC"]
+    if not os.path.isfile(input_file):
+        return ORG
+    from gpevo.FunctionFolder.USPEX.src.createORG_System import createORG_System
+    from gpevo.FunctionFolder.USPEX.src.createORG_AbinitCode import \
+        createORG_AbinitCode
+    from gpevo.FunctionFolder.USPEX.src.createORG_Symmetry import createORG_Symmetry
+    from gpevo.FunctionFolder.USPEX.src.createORG_EA import createORG_EA
+    from gpevo.FunctionFolder.USPEX.src.createORG_Molecule import createORG_Molecule
+    from gpevo.FunctionFolder.USPEX.src.createORG_Fingerprint import \
+        createORG_Fingerprint
+
+    snapshot = copy.deepcopy(dict(ORG))
+    try:
+        createORG_System(input_file)
+        createORG_AbinitCode(input_file)
+        createORG_Symmetry(input_file)
+        createORG_EA(input_file)
+        if os.path.exists(os.path.join(ORG.homePath, "MOL_1")):
+            createORG_Molecule(input_file)
+        createORG_Fingerprint(input_file)
+    except Exception as exc:
+        console_print(f"  Warning: INPUT.txt could not be re-read on restart "
+                      f"({exc}); the checkpoint's settings are kept")
+        G["ORG_STRUC"].clear()
+        G["ORG_STRUC"].update(snapshot)
+        return G["ORG_STRUC"]
+
+    ORG = G["ORG_STRUC"]
+    _report_changes(snapshot, ORG)
+    for name in _RESTART_KEEP:
+        if name in snapshot:
+            setattr(ORG, name, snapshot[name])
+    return ORG
+
+
 def Start():
     _setup_rng(None)
 
@@ -48,11 +137,14 @@ def Start():
             POP.resFolder = ORG.resFolder
         G["POP_STRUC"] = POP
         G["ORG_STRUC"] = ORG
-        # Refresh fingerprint weights.  Older checkpoints were saved before
-        # the molecular weight bug was fixed and may therefore contain an
-        # atom-type weight vector sized for numMols instead of numIons.
-        from gpevo.FunctionFolder.USPEX.src.createORG_Fingerprint import createORG_Fingerprint
-        createORG_Fingerprint("INPUT.txt")
+        # Re-read INPUT.txt: the checkpoint is the only source of options on a
+        # restart, so anything edited while the run was stopped (the GP gates
+        # above all) would otherwise be ignored.  Fingerprint weights are
+        # refreshed here too -- older checkpoints were saved before the
+        # molecular weight bug was fixed and may carry an atom-type weight
+        # vector sized for numMols instead of numIons.
+        ORG = _refresh_input_options("INPUT.txt")
+        G["ORG_STRUC"] = ORG
         # Reprocess already-relaxed individuals from a finished checkpoint so
         # restarted runs no longer keep N/A descriptor columns.
         from gpevo.FunctionFolder.sys.fingerprint_utils import compute_structure_metrics

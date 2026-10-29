@@ -150,6 +150,22 @@ explore : 0 后
 
 代价是失去探索：训练库很久没有新区域时，σ 大的晶体不再被优先采样，模型可能收敛到一个局部区域。想保留探索就保持 `1`，或改用 `mode : uncertainty`（那本来就是纯 σ 排序，是另一回事）。`mode` 标签会打印成 `EI (no exploration)` 以示区别。
 
+#### 重启时会重读 INPUT.txt
+
+`Start()` 的重启分支是从 `Current_ORG.pkl` 恢复 ORG 的，以前只重解析了指纹块，所以**停机期间改的 INPUT.txt 一律不生效**（GP 的 `den`/`u`/`k`/`explore` 尤其容易被忽略）。现在重启会重新跑一遍选项解析器（`createORG_System` / `_AbinitCode` / `_Symmetry` / `_EA` / `_Molecule` / `_Fingerprint`，它们都是纯函数，只改 ORG 属性），改完的项会打印出来：
+
+```
+  INPUT.txt (re-read on restart) gpDen: 1.8 -> 1.75
+  INPUT.txt (re-read on restart) gpU: 0.03 -> 0.06
+```
+
+两类属性**不会**被 INPUT.txt 覆盖，仍以 checkpoint 为准：
+
+- **开局就定死的结构量**：`dimension` / `molecule` / `varcomp` / `optType` / `populationSize` / `numGenerations` / `numIons` / `resFolder` —— 中途改了会和 checkpoint 里已恢复的种群矛盾；
+- **循环自己写回的演进量**：`latVolume`（每代由种群体积重新平均）、`firstGeneSplit*`、以及 `update_STUFF` 每代重建的 `tournament` / `fracTrans` / `howMany*` 等。
+
+INPUT.txt 写坏了也不会让正在跑的计算挂掉：解析异常时打印一行 `Warning: INPUT.txt could not be re-read on restart`，然后把 checkpoint 原样放回去继续跑。
+
 `cache : 1` 省掉的是每代每个晶体 1 次 ReaxFF 重优化 + 4 次 GULP（特征计算）。前提是 GP 步读的 `gulp.cif` 与 `Individuals.traj` 帧是**同一个弛豫后的结构**（`WriteIndividualsTraj` 写的就是 `s.COORDINATES`），所以复用不会换结构，只是不再重新走一遍极小化。日志会打出实际复用个数：
 
 ```
