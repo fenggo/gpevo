@@ -908,9 +908,11 @@ def _gp_active_learning(ORG, POP, fitness):
         console_print("  No valid crystals with residual <= 10, skipping pred")
         return fitness
 
-    pred_log = os.path.join(res_folder, "density_predict.log")
-    if os.path.isfile(pred_log):
-        os.remove(pred_log)
+    # uspexkit.pred appends to results1/density_predict.log and does not
+    # rewrite it: that log is the only place that keeps the σ a crystal was
+    # predicted with, and `gpevo ei-report` needs the σ of the crystals EI
+    # labelled in *earlier* generations.  Crystal ids are unique across
+    # generations, so rows never collide (and a repeat would just overwrite).
     # Reuse the features the GP step of this generation already computed: the
     # geometry pred() would re-optimise is the same relaxed one, so this skips
     # one ReaxFF optimisation and four GULP runs per crystal.

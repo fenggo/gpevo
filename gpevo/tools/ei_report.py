@@ -14,11 +14,10 @@ Three panels:
 1. **Evolution** -- every structure as a dot, the per-generation maximum and
    the best-so-far step curve, with the EI-selected crystals circled and the
    DFT-verified ones as diamonds.
-2. **Convergence** -- the best density *among the crystals EI labelled*, against
-   the number of labels spent, next to what the same budget would have found
-   picking at random.  This is the panel that says whether the acquisition is
-   worth its DFT: a curve inside the random band means the selection buys
-   nothing over chance.
+2. **Convergence** -- the EI selection trend: every EI-labelled crystal as a
+   dot at its generation (x) against its density (y), with the GP uncertainty
+   (±1.96σ on the density) drawn as an error bar, the best density found so far
+   as a step line and the DFT reference of each crystal as a red diamond.
 3. **Learning** -- per generation the GP uncertainty (σ) of the population and
    the labels/LOO RMSE of the training set, when the run logged them.
 
@@ -355,37 +354,104 @@ def plot_evolution(summary, rows, dft, out_png):
     return f"  Saved {out_png}"
 
 
-def plot_convergence(ei, steps, mean, low, high, out_png):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except Exception as exc:                      # pragma: no cover
-        return f"  (convergence plot skipped: matplotlib unavailable: {exc})"
+def _ei_series(summary):
+    """``[{gen, density, sigma, dft}, ...]`` of the EI-labelled crystals, in pick order."""
+    series = []
+    for gen in sorted(summary):
+        for pick in summary[gen].get("picks", []):
+            density = pick.get("density", float("nan"))
+            if math.isfinite(density):
+                series.append({
+                    "gen": gen,
+                    "density": density,
+                    "sigma": pick.get("sigma", float("nan")),
+                    "dft": pick.get("dft", float("nan")),
+                })
+    return series
+
+
+def _convergence_figure(ei_series):
+    """The convergence figure; split out so tests can inspect its axes."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
-    if steps and mean:
-        ax.fill_between(steps, low, high, color="#95a5a6", alpha=0.35,
-                        label="random selection of the same budget (10–90%)")
-        ax.plot(steps, mean, "--", color="#7f8c8d", lw=1.6,
-                label="random selection (mean)")
-    if ei:
-        ax.plot(range(1, len(ei) + 1), ei, "o-", color="#27ae60", lw=2.2, ms=6,
-                zorder=5, label="EI-selected (best labelled so far)")
-    else:
+    if not ei_series:
         ax.text(0.5, 0.5, "no crystal was labelled: ei.log is empty",
                 transform=ax.transAxes, ha="center", va="center", fontsize=11,
                 color="#c0392b")
-    ax.set_xlabel("Reference (DFT) labels spent")
-    ax.set_ylabel(r"Best density among the labelled crystals (g/cm$^3$)")
-    ax.set_title("Does the EI selection beat chance?", fontsize=12,
+        ax.set_xlabel("Generation")
+        ax.set_ylabel(r"Density (g/cm$^3$)")
+        ax.set_title("EI selection trend across generations", fontsize=12,
+                     fontweight="bold")
+        return fig, ax
+
+    gens = [entry["gen"] for entry in ei_series]
+    dens = [entry["density"] for entry in ei_series]
+    sigmas = [entry["sigma"] for entry in ei_series]
+
+    # best-so-far as generations advance
+    running, best = float("-inf"), []
+    for value in dens:
+        running = max(running, value)
+        best.append(running)
+    ax.step(gens, best, where="post", color="#1a5276", lw=2.0, zorder=4,
+            label="best so far")
+
+    # the GP uncertainty (±1.96σ) on each EI-selected density, as error bars
+    ax.errorbar(gens, dens, yerr=sigmas, fmt="o", color="#27ae60",
+                ecolor="#1e8449", elinewidth=1.2, capsize=3, ms=7, zorder=5,
+                label=r"EI-selected density $\pm$1.96$\sigma$")
+
+    # the reference measurement of the same crystal, drawn next to the ML value
+    dft_dens, dft_gens = [], []
+    for entry in ei_series:
+        if math.isfinite(entry["dft"]):
+            dft_dens.append(entry["dft"])
+            dft_gens.append(entry["gen"])
+            ax.plot([entry["gen"], entry["gen"]], [entry["density"], entry["dft"]],
+                    color="#7f8c8d", lw=0.8, ls="--", alpha=0.7, zorder=3)
+    if dft_dens:
+        ax.scatter(dft_gens, dft_dens, marker="D", s=50, color="#c0392b",
+                   edgecolors="#641e16", linewidths=0.8, zorder=6,
+                   label="DFT density of selected")
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel(r"Density (g/cm$^3$)")
+    ax.set_title("EI selection trend across generations", fontsize=12,
                  fontweight="bold")
+    ax.set_xticks(sorted(set(gens)))
     ax.grid(True, alpha=0.25, linestyle="--")
     ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
+    return fig, ax
+
+
+def plot_convergence(ei_series, out_png):
+    """EI selection trend: x = generation, y = density, with GP uncertainty bars.
+
+    Every EI-labelled crystal is a green dot at its generation, with the GP
+    uncertainty (±1.96σ on the density) as an error bar; the blue step line is
+    the best density found so far as generations advance, and a red diamond is
+    the DFT reference of that same crystal.
+    """
+    try:
+        fig, ax = _convergence_figure(ei_series)
+    except Exception as exc:                      # pragma: no cover
+        return f"  (convergence plot skipped: {exc})"
     fig.tight_layout()
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    import matplotlib.pyplot as plt
     plt.close(fig)
-    return f"  Saved {out_png}"
+    message = f"  Saved {out_png}"
+    with_sigma = sum(1 for e in ei_series if math.isfinite(e.get("sigma", float("nan"))))
+    if ei_series and with_sigma < len(ei_series):
+        # Runs made before density_predict.log started accumulating only have
+        # the σ of the last generation, so only the newest pick gets a bar.
+        message += (f"  (σ for {with_sigma}/{len(ei_series)} EI-selected "
+                    f"crystals: this run's density_predict.log was rewritten "
+                    f"every generation)")
+    return message
 
 
 def plot_learning(summary, learning, out_png):
@@ -507,6 +573,7 @@ def ei_report(path=".", out=None, trials=200, quiet=False):
     ei = ei_curve(summary, gen_ids, ei_log)
     steps, mean, low, high = random_baseline(gen_ids, by_id, ei_log,
                                              trials=trials)
+    ei_series = _ei_series(summary)
 
     prefix = out or os.path.join(res_dir, "ei_report")
     messages = [f"Generations {min(gen_ids)}–{max(gen_ids)}: "
@@ -514,8 +581,7 @@ def ei_report(path=".", out=None, trials=200, quiet=False):
                 f"{len(dft)} DFT references, {sum(len(v) for v in ei_log.values())} "
                 f"EI-selected crystals"]
     messages.append(plot_evolution(summary, rows, dft, prefix + "_evolution.png"))
-    messages.append(plot_convergence(ei, steps, mean, low, high,
-                                     prefix + "_convergence.png"))
+    messages.append(plot_convergence(ei_series, prefix + "_convergence.png"))
     messages.append(plot_learning(summary, learning, prefix + "_learning.png"))
     text = "\n".join(messages)
     if not quiet:

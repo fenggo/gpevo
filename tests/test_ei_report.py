@@ -6,6 +6,7 @@ being written (matplotlib is required for those two assertions).
 """
 from __future__ import annotations
 
+import math
 import os
 
 import pytest
@@ -147,6 +148,57 @@ def test_ei_report_writes_the_three_figures(run, tmp_path):
     for suffix in ("_evolution.png", "_convergence.png", "_learning.png"):
         assert os.path.isfile(out + suffix), suffix
         assert os.path.getsize(out + suffix) > 0
+
+
+def test_convergence_plots_generation_on_the_y_axis(run):
+    """The convergence panel was flipped: y = Generation, x = Density."""
+    path, res, densities, picks = run
+    rows, gen_ids = report_module.parse_individuals(str(res / "Individuals"))
+    pred = report_module.parse_density_predict(str(res / "density_predict.log"))
+    dft = report_module.parse_density_log(str(res / "density.log"))
+    ei_log = report_module.parse_ei_log(os.path.join(path, "ei.log"))
+    summary = report_module.build_summary(rows, gen_ids, pred, dft, ei_log)
+
+    series = report_module._ei_series(summary)
+    assert [entry["gen"] for entry in series] == [2, 3, 4]
+    assert len(series) == 3
+    # each pick carries its DFT reference (the densest crystal of its generation)
+    assert all(math.isfinite(entry["dft"]) for entry in series)
+
+    fig, ax = report_module._convergence_figure(series)
+    import matplotlib.pyplot as plt
+    from matplotlib.container import ErrorbarContainer
+    assert ax.get_xlabel() == "Generation"
+    assert "Density" in ax.get_ylabel()
+    # every pick carries the GP uncertainty, and it is drawn as an error bar
+    assert all(math.isfinite(entry["sigma"]) for entry in series)
+    assert any(isinstance(c, ErrorbarContainer) for c in ax.containers)
+    texts = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert any("1.96" in t for t in texts), texts
+    plt.close(fig)
+
+
+def test_convergence_without_sigma_still_plots(run):
+    """A run whose log predates the append-only fix: no σ, but no crash."""
+    path, res, densities, picks = run
+    rows, gen_ids = report_module.parse_individuals(str(res / "Individuals"))
+    # only the last generation was kept, as a rewritten density_predict.log had
+    (res / "density_predict.log").write_text(
+        "# Crystal_id Residual Density_mlp Density_rf Density_gp std_den Energy std_eng\n"
+        f" 25 0.004 1.90 1.81 {densities[25]:.4f} 0.0170 -28080.9 0.11\n",
+        encoding="utf-8")
+    pred = report_module.parse_density_predict(str(res / "density_predict.log"))
+    dft = report_module.parse_density_log(str(res / "density.log"))
+    ei_log = report_module.parse_ei_log(os.path.join(path, "ei.log"))
+    summary = report_module.build_summary(rows, gen_ids, pred, dft, ei_log)
+
+    series = report_module._ei_series(summary)
+    assert len(series) == 3
+    assert sum(1 for e in series if math.isfinite(e["sigma"])) == 1
+
+    import matplotlib.pyplot as plt
+    fig, ax = report_module._convergence_figure(series)
+    plt.close(fig)
 
 
 def test_ei_report_on_a_run_without_any_label(run, tmp_path):

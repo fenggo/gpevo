@@ -284,11 +284,13 @@ gpevo ei-report -p DIR --out PREFIX --trials 300
 
 ### `gpevo ei-report`
 
-读一个运行目录里**已经落盘**的东西（不重算任何 GP/ReaxFF）——`results1/Individuals`（每代每个结构的密度）、`results1/density_predict.log`（GP μ/σ）、`results1/density.log`（DFT 参考）、`ei.log`（每代 EI 送 DFT 的 id）、`log`（`GP learning curve` 行）——画三张图并打一份逐代报告：
+读一个运行目录里**已经落盘**的东西（不重算任何 GP/ReaxFF）——`results1/Individuals`（每代每个结构的密度）、`results1/density_predict.log`（GP μ/σ，**逐代追加、跨代累积**）、`results1/density.log`（DFT 参考）、`ei.log`（每代 EI 送 DFT 的 id）、`log`（`GP learning curve` 行）——画三张图并打一份逐代报告：
 
 - **evolution**：全部结构散点 + 每代最优曲线 + best-so-far 阶梯，EI 选中的晶体画绿圈、DFT 验证值画红菱形；
-- **convergence**：EI 花掉的每个 DFT 标签换到了多高的密度，对照**同预算随机选晶体**的均值与 10–90% 区间——曲线在带内 = EI 白花钱，在带上方 = 采样有信息；
+- **convergence**：EI 选择趋势图，横轴是**代次**、纵轴是**密度**——每个被 EI 选中的晶体按所在代次落点（绿点），带 **GP 不确定度误差棒（±1.96σ）**；蓝阶梯线是该代次为止的最佳密度，红菱形是该晶体的 DFT 真值；
 - **learning**：每代平均 GP σ、打标签数与 LOO RMSE（有记录才画）。
+
+误差棒的 σ 来自 `density_predict.log`。早期版本每代都会**重写**这个文件，所以只有最后一代的晶体留有 σ，`convergence` 图上就只有最新那个点有误差棒（此时 `ei-report` 会打印 `σ for n/m EI-selected crystals` 提示）；现在它改为逐代追加，新跑的运行每个点都有误差棒。已经跑完的旧运行里，往代的 σ 没有落盘，无法事后补回。
 
 真实运行上它直接回答"EI 到底有没有用"：某个 TNT·CL-20 运行（14 代、690 结构、26 个标签）上，EI 第 1 个标签就到 1.918、第 4 个到 1.94，随机基线要到第 ~8 个标签才追平，最终 1.9470 对随机的 90 分位 1.9460。
 
