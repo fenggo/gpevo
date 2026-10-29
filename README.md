@@ -278,7 +278,19 @@ gpevo clean -n      # 只列出会删什么，不动文件
 gpevo clean -a      # 连 results*/ 一起删
 gpevo clean -p DIR  # 清理别的目录（不是当前目录）
 gpevo clean -f      # 目录里没有 INPUT.txt / CalcFold 也照样清
+gpevo ei-report     # 逐代密度演化 + EI 收敛性（见下）
+gpevo ei-report -p DIR --out PREFIX --trials 300
 ```
+
+### `gpevo ei-report`
+
+读一个运行目录里**已经落盘**的东西（不重算任何 GP/ReaxFF）——`results1/Individuals`（每代每个结构的密度）、`results1/density_predict.log`（GP μ/σ）、`results1/density.log`（DFT 参考）、`ei.log`（每代 EI 送 DFT 的 id）、`log`（`GP learning curve` 行）——画三张图并打一份逐代报告：
+
+- **evolution**：全部结构散点 + 每代最优曲线 + best-so-far 阶梯，EI 选中的晶体画绿圈、DFT 验证值画红菱形；
+- **convergence**：EI 花掉的每个 DFT 标签换到了多高的密度，对照**同预算随机选晶体**的均值与 10–90% 区间——曲线在带内 = EI 白花钱，在带上方 = 采样有信息；
+- **learning**：每代平均 GP σ、打标签数与 LOO RMSE（有记录才画）。
+
+真实运行上它直接回答"EI 到底有没有用"：某个 TNT·CL-20 运行（14 代、690 结构、26 个标签）上，EI 第 1 个标签就到 1.918、第 4 个到 1.94，随机基线要到第 ~8 个标签才追平，最终 1.9470 对随机的 90 分位 1.9460。
 
 `gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings` 这些状态文件。
 

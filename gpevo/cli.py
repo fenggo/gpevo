@@ -36,6 +36,18 @@ def _build_parser():
     parser_clean.add_argument("-n", "--dry-run", action="store_true",
                               help="list what would be removed instead of "
                                    "removing it")
+    parser_ei = subparsers.add_parser(
+        "ei-report",
+        help="per-generation density evolution and EI convergence of a run",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_ei.add_argument("-p", "--path", default=".", help="run directory")
+    parser_ei.add_argument("--out", default=None,
+                           help="output prefix (default <run>/results1/ei_report)")
+    parser_ei.add_argument("--trials", type=int, default=200,
+                           help="random-selection draws of the convergence baseline")
+    parser_ei.add_argument("-n", "--dry-run", action="store_true",
+                           help="print the per-generation report without plotting")
     return parser
 
 
@@ -49,6 +61,13 @@ def main(argv=None):
         from gpevo.tools.clean import clean
         clean(path=args.path, all_=args.all, force=args.force,
               dry_run=args.dry_run)
+        return
+    if args.command == "ei-report":
+        from gpevo.tools.ei_report import ei_report
+        if args.dry_run:
+            print(ei_report(path=args.path, trials=args.trials, quiet=True))
+        else:
+            ei_report(path=args.path, out=args.out, trials=args.trials)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
