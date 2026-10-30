@@ -3,6 +3,9 @@
 > 本文整理自 gpevo 代码审查对话，说明 `gpevo/FunctionFolder/USPEX/src/gp_ml.py` 中
 > Expected Improvement（期望改进）主动学习的原理、数学形式、代码实现，以及它与
 > 贝叶斯优化的关系。行号以 `gpevo-codebuddy` 当前版本为准。
+>
+> 理论依据与教科书口径的差异（EGO 出处、σ 校准前提、top-K vs q-EI、den 硬门 vs cEI）
+> 见姊妹篇 `ei_theoretical_basis.md`。
 
 ---
 
