@@ -159,6 +159,10 @@ def read_molecules():
         stdmol.append(mol)
 
     ORG.STDMOL = stdmol
+    # Reference intramolecular bond tables (built once at startup; the molecule
+    # check compares every relaxed individual against these).
+    from gpevo.FunctionFolder.sys.mol_bond_table import build_reference_bond_tables
+    build_reference_bond_tables()
     # rad_ij, center minimum distance matrix
     n = len(stdmol)
     cm = np.zeros((n, n))

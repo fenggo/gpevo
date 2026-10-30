@@ -12,6 +12,9 @@ from gpevo.runtime import G, AttrDict
 from gpevo.log_utils import console_print
 from gpevo.FunctionFolder.USPEX.src.NEW_coord2Zmatrix import NEW_coord2Zmatrix
 from gpevo.FunctionFolder.USPEX.src.newMolCheck import newMolCheck
+from gpevo.FunctionFolder.sys.mol_bond_table import (
+    intramol_bonds, build_reference_bond_tables,
+)
 
 
 def _movecoor(coords, lat, fmt):
@@ -135,6 +138,10 @@ def _check_molecules(s, maxdist=0.6, label=""):
 
     lattice = np.asarray(s.LATTICE, dtype=float).reshape(3, 3)
     mtype_list = [int(v) for v in s.MtypeLIST]
+    ref = getattr(ORG, "molRefBonds", None)
+    if ref is None:
+        build_reference_bond_tables()
+        ref = ORG.molRefBonds
     for mi, mtype in enumerate(mtype_list):
         std = ORG.STDMOL[mtype - 1]
         zmatrix = np.asarray(s.MOLECULES[mi].ZMATRIX, dtype=float)
@@ -153,17 +160,33 @@ def _check_molecules(s, maxdist=0.6, label=""):
         except Exception:
             poly = 1
 
-        if decompose or poly == 0:
+        # Intramolecular bond-increase check: a molecule that gained a bond not
+        # present in the template (e.g. an unwanted dimerisation / ring closure)
+        # is treated as damaged.
+        bond_increase = 0
+        mol_coords = np.asarray(s.MOLECULES[mi].MOLCOORS, dtype=float)
+        mol_types = [int(t) for t in std.types]
+        cur_bonds = intramol_bonds(mol_coords, mol_types)
+        ref_set = ref[mtype - 1] if 0 <= mtype - 1 < len(ref) else set()
+        if cur_bonds - ref_set:
+            bond_increase = 1
+
+        if decompose or poly == 0 or bond_increase:
             enthalpies = np.asarray(s.Enthalpies, dtype=float).copy()
             enthalpies[-1] = 100000.0
             s.Enthalpies = enthalpies
             s.moleculeCheck = "MOLECULE FORM is not kept"
+            if bond_increase:
+                s.moleculeCheck += " (intramolecular bond increase)"
             # readMOL.m:142 uses disp(), so the warning stays on the terminal
             # and is not written to OUTPUT.txt; the 1-based index is the one
             # passed to the function, not POPULATION(i).Number (0 when the
             # individual has not been registered yet).
-            console_print(f"{label}: MOLECULE FORM is not kept, "
-                          f"see Warnings for more details ...")
+            msg = f"{label}: MOLECULE FORM is not kept"
+            if bond_increase:
+                msg += " (intramolecular bond increase)"
+            msg += ", see Warnings for more details ..."
+            console_print(msg)
             if int(np.max(np.asarray(step, dtype=float))) >= 2:
                 s.Error = int(getattr(s, "Error", 0)) + 4
             break
