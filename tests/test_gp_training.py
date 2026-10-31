@@ -47,6 +47,25 @@ def _add_rows(data_dir, n_rows, start=0):
                 fd.write("{}, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.9\n".format(i))
 
 
+def test_ei_log_is_written_into_the_results_folder(tmp_path):
+    """It belongs to the run that produced it, so not to the home directory."""
+    home = tmp_path / "home"
+    res = home / "results3"
+    res.mkdir(parents=True)
+    ORG = struct(homePath=str(home), resFolder=str(res))
+    gp_ml._write_ei_log(ORG, 4, [17, 25])
+    assert (res / "ei.log").read_text(encoding="utf-8") == "gen 4:17 25\n"
+    assert not (home / "ei.log").exists()
+
+
+def test_ei_log_falls_back_to_the_home_directory(tmp_path):
+    """resFolder is empty until createORGStruc runs."""
+    home = tmp_path / "home"
+    home.mkdir()
+    gp_ml._write_ei_log(struct(homePath=str(home), resFolder=""), 1, [7])
+    assert (home / "ei.log").read_text(encoding="utf-8") == "gen 1:7\n"
+
+
 @pytest.fixture
 def run(tmp_path):
     """A throwaway run directory: home/results1/<data> plus a trajectory."""

@@ -12,7 +12,9 @@ Rules, in one place instead of three slightly different copies:
 * files         ``*.pkl``, ``*.mat``, ``*.backup``, plus the state files
   ``still_running``, ``USPEX_IS_DONE``, ``octave-workspace``, ``Warnings`` and
   the ``ei.log`` of the GP selection -- it is appended to, so a new run would
-  otherwise report the crystals an earlier one labelled.
+  otherwise report the crystals an earlier one labelled.  Current runs write
+  that log into their own ``results<N>/``; only the home-directory copy of a
+  run finished before that move is left to remove.
 
 ``--all`` additionally removes ``results*/``.  Nothing else is ever touched:
 ``Specific``, ``Seeds``, ``INPUT.txt``, ``MOL_*`` and the GP data directory are
@@ -27,7 +29,8 @@ import shutil
 # Deleted by a plain `gpevo clean`.
 # ``ei.log`` is appended to by every generation that labels something, so it
 # belongs with the other per-run state: leaving it behind mixes the selections
-# of two runs in one file.
+# of two runs in one file.  It is written to ``results<N>/`` nowadays, so this
+# only picks up the home-directory copy an older run left behind.
 _STATE_FILES = ("still_running", "USPEX_IS_DONE", "octave-workspace", "Warnings",
                 "ei.log")
 _FILE_PATTERNS = ("*.pkl", "*.mat", "*.backup")

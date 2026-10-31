@@ -216,3 +216,57 @@ def test_cli_subcommand_is_wired(tmp_path, capsys):
     # say so instead of raising
     main(["ei-report", "-p", str(tmp_path), "-n"])
     assert "No Individuals table" in capsys.readouterr().out
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  results<N> resolution: ei.log now lives with the run that wrote it
+# ──────────────────────────────────────────────────────────────────────
+
+def test_newest_results_folder_wins(tmp_path):
+    (tmp_path / "results1").mkdir()
+    (tmp_path / "results2").mkdir()
+    assert report_module.resolve_results_dir(str(tmp_path)) == str(tmp_path / "results2")
+
+
+def test_results_folder_can_be_selected(tmp_path):
+    (tmp_path / "results1").mkdir()
+    (tmp_path / "results2").mkdir()
+    assert report_module.resolve_results_dir(str(tmp_path), 1) == str(tmp_path / "results1")
+    assert report_module.resolve_results_dir(str(tmp_path), "results2") == str(tmp_path / "results2")
+
+
+def test_unknown_results_folder_is_reported(tmp_path):
+    with pytest.raises(SystemExit):
+        report_module.resolve_results_dir(str(tmp_path), 9)
+
+
+def test_run_without_a_results_folder_reads_the_run_dir(tmp_path):
+    assert report_module.resolve_results_dir(str(tmp_path)) == str(tmp_path)
+
+
+def test_cli_selects_the_results_folder(tmp_path, capsys):
+    """cli.py carries its own copy of the parser: --results has to land there."""
+    for name, gens in (("results1", 2), ("results2", 3)):
+        res = tmp_path / name
+        res.mkdir()
+        with open(res / "Individuals", "w", encoding="utf-8") as fd:
+            fd.write(HEADER)
+            for gen in range(1, gens + 1):
+                for i in range(4):
+                    fd.write(_row(gen, (gen - 1) * 4 + i + 1, 1.70 + 0.01 * gen))
+    from gpevo.cli import main
+
+    main(["ei-report", "-p", str(tmp_path), "--results", "1", "-n"])
+    assert "Generations 1–2" in capsys.readouterr().out
+    main(["ei-report", "-p", str(tmp_path), "-n"])      # newest by default
+    assert "Generations 1–3" in capsys.readouterr().out
+
+
+def test_ei_log_is_read_from_the_results_folder(run):
+    """It sits next to Individuals now, not in the home directory."""
+    path, res, _densities, picks = run
+    (res / "ei.log").write_text(
+        "".join(f"gen {gen}:{cid}\n" for gen, cid in picks.items()), encoding="utf-8")
+    os.remove(os.path.join(path, "ei.log"))   # nothing left to fall back on
+    text = report_module.ei_report(path=path, quiet=True, trials=20)
+    assert "3 EI-selected crystals" in text
