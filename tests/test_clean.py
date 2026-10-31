@@ -46,7 +46,8 @@ def run_dir(tmp_path):
     _touch(os.path.join(root, "USPEX_IS_DONE"))
     _touch(os.path.join(root, "Warnings"))
     _touch(os.path.join(root, "ei.log"), "gen 2:117 177\ngen 3:201 218\n")
-    # per-structure scratch of the reference (labelling) runs
+    # the DFT uspexkit.calc ran for the labelled structures: part of the run's
+    # record now, so a plain clean keeps it and only --all drops it
     _touch(os.path.join(root, "results1", "7", "siesta.out"))
     _touch(os.path.join(root, "results1", "12", "POSCAR.12"))
     return root
@@ -63,9 +64,6 @@ def test_clean_removes_scratch_and_keeps_assets(run_dir, capsys):
                  "Current_POP.pkl", "leftover.mat", "old.backup",
                  "still_running", "USPEX_IS_DONE", "Warnings", "ei.log"):
         assert not _exists(run_dir, gone), gone
-    # the per-structure labelling folders go, everything else in results* stays
-    assert not _exists(run_dir, "results1", "7")
-    assert not _exists(run_dir, "results1", "12")
     for kept in ("INPUT.txt", "MOL_1", "Specific", "Seeds", "data", "results1"):
         assert _exists(run_dir, kept), kept
     assert _exists(run_dir, "results1", "gatheredPOSCARS")
@@ -75,10 +73,23 @@ def test_clean_removes_scratch_and_keeps_assets(run_dir, capsys):
     assert "removed" in capsys.readouterr().out
 
 
+def test_clean_keeps_the_dft_folders_of_the_labelled_structures(run_dir):
+    """results1/<ID>/ is what uspexkit.calc wrote: the run's DFT record."""
+    clean(path=run_dir)
+
+    assert _exists(run_dir, "results1", "7", "siesta.out")
+    assert _exists(run_dir, "results1", "12", "POSCAR.12")
+    # and the dry run must not offer them either
+    clean(path=run_dir, dry_run=True)
+    assert _exists(run_dir, "results1", "7", "siesta.out")
+
+
 def test_all_also_removes_results(run_dir):
     clean(path=run_dir, all_=True)
 
     assert not _exists(run_dir, "results1")
+    assert not _exists(run_dir, "results1", "7")
+    assert not _exists(run_dir, "results1", "12")
     assert _exists(run_dir, "INPUT.txt")
     assert _exists(run_dir, "Specific")
     assert _exists(run_dir, "data")

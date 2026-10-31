@@ -8,13 +8,19 @@ checkpoints, the "still running" flags) and keeps what a run cannot do without
 Rules, in one place instead of three slightly different copies:
 
 * directories   ``AntiSeeds``, ``CalcFold*`` (every one of them, not just
-  ``CalcFold1``) and the per-structure ``results*/<ID>`` scratch folders;
+  ``CalcFold1``);
 * files         ``*.pkl``, ``*.mat``, ``*.backup``, plus the state files
   ``still_running``, ``USPEX_IS_DONE``, ``octave-workspace``, ``Warnings`` and
   the ``ei.log`` of the GP selection -- it is appended to, so a new run would
   otherwise report the crystals an earlier one labelled.  Current runs write
   that log into their own ``results<N>/``; only the home-directory copy of a
   run finished before that move is left to remove.
+
+The per-structure ``results*/<ID>`` folders -- what ``uspexkit.calc`` writes
+when it labels a structure -- are **kept**: they are the DFT record of that
+run, sitting next to its ``Individuals`` and ``ei.log``, and a following run
+opens its own ``results<N+1>`` anyway.  ``--all`` removes them with the rest of
+``results*/``.
 
 ``--all`` additionally removes ``results*/``.  Nothing else is ever touched:
 ``Specific``, ``Seeds``, ``INPUT.txt``, ``MOL_*`` and the GP data directory are
@@ -50,12 +56,10 @@ def _plan(root, all_):
     directories = []
     for pattern in _DIR_PATTERNS:
         directories.extend(glob.glob(os.path.join(root, pattern)))
-    # results*/<ID>: the folders uspexkit.calc creates when it labels a
-    # structure.  Only the numeric ones -- AuxiliaryFiles and generationN stay.
-    for results_dir in sorted(glob.glob(os.path.join(root, "results*"))):
-        for entry in sorted(glob.glob(os.path.join(results_dir, "*"))):
-            if os.path.isdir(entry) and os.path.basename(entry).isdigit():
-                directories.append(entry)
+    # results*/<ID> -- the folders uspexkit.calc creates when it labels a
+    # structure -- are the DFT record of that run, so they stay: a new run
+    # writes into its own results<N+1> and never inherits them.  Only --all,
+    # which drops results*/ wholesale, takes them along.
     if all_:
         directories.extend(sorted(glob.glob(os.path.join(root, "results*"))))
 
