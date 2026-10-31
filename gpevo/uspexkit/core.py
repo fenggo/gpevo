@@ -647,7 +647,8 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
         g: geometry structure file name (None = use trajectory)
         gen: generation number (None = latest)
         f: feature flag (1 = 8D feature, else 7D)
-        den: density threshold
+        den: unused -- every crystal with a negative fitness is predicted, the
+             density threshold no longer drops any of them
         ids: comma/space separated crystal indices
         step: optimization steps
         ncpu: number of CPUs
@@ -669,8 +670,11 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     elif not ids:
         ids_list = []
         res = read_individuals(g=gen)
-        for i, e, d, _f in res:
-            if d > den and _f < 0.0:
+        for i, _e, _d, _f in res:
+            # No density gate: a low-density crystal still has to reach
+            # density_predict.log, since the reports read every EI pick from it
+            # and a missing row reads as "this crystal never got predicted".
+            if _f < 0.0:
                 ids_list.append(i)
     else:
         ids_list = [int(i) for i in ids.split()]

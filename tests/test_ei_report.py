@@ -178,6 +178,32 @@ def test_convergence_plots_generation_on_the_y_axis(run):
     plt.close(fig)
 
 
+def test_convergence_puts_the_uncertainty_on_the_gp_prediction():
+    """σ is the spread of the GP mean, so the bar is drawn around μ, not ρ_ML."""
+    series = [
+        {"gen": 2, "density": 1.700, "density_gp": 1.820, "sigma": 0.030,
+         "dft": 1.760},
+        {"gen": 3, "density": 1.740, "density_gp": 1.860, "sigma": 0.020,
+         "dft": 1.850},
+    ]
+    import matplotlib.pyplot as plt
+    from matplotlib.container import ErrorbarContainer
+
+    fig, ax = report_module._convergence_figure(series)
+    bars = [c for c in ax.containers if isinstance(c, ErrorbarContainer)]
+    assert bars, ax.containers
+    # centres on the GP predictions, not on the densities of the fourth argument
+    assert list(bars[0][0].get_ydata()) == pytest.approx([1.820, 1.860])
+    texts = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert any("GP prediction" in t and "1.96" in t for t in texts), texts
+    assert any("DFT density" in t for t in texts), texts
+    # the search's own density is only the ceiling line, not a marker series
+    assert not any("ML density of selected" in t for t in texts), texts
+    step = [l for l in ax.get_lines() if l.get_marker() == "o"]
+    assert step, [l.get_marker() for l in ax.get_lines()]
+    plt.close(fig)
+
+
 def test_convergence_without_sigma_still_plots(run):
     """A run whose log predates the append-only fix: no σ, but no crash."""
     path, res, densities, picks = run

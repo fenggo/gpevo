@@ -14,10 +14,11 @@ Three panels:
 1. **Evolution** -- every structure as a dot, the per-generation maximum and
    the best-so-far step curve, with the EI-selected crystals circled and the
    DFT-verified ones as diamonds.
-2. **Convergence** -- the EI selection trend: every EI-labelled crystal as a
-   dot at its generation (x) against its density (y), with the GP uncertainty
-   (±1.96σ on the density) drawn as an error bar, the best density found so far
-   as a step line and the DFT reference of each crystal as a red diamond.
+2. **Convergence** -- the EI selection trend: every EI-labelled crystal is one
+   purple square at its generation (x) holding the GP prediction EI ranked on
+   (y) and the ±1.96σ uncertainty of *that* prediction as the error bar; dots
+   joined by a line are the best density found so far, and a red diamond tied to
+   its square by a dashed bracket is the DFT reference of that crystal.
 3. **Learning** -- per generation the GP uncertainty (σ) of the population and
    the labels/LOO RMSE of the training set, when the run logged them.
 
@@ -355,18 +356,26 @@ def plot_evolution(summary, rows, dft, out_png):
 
 
 def _ei_series(summary):
-    """``[{gen, density, sigma, dft}, ...]`` of the EI-labelled crystals, in pick order."""
+    """``[{gen, density, density_gp, sigma, dft}, ...]`` of the EI picks, in order.
+
+    ``density`` is what the search itself computed (the MLP relaxation);
+    ``density_gp`` is the mean EI ranked on -- and the value ``sigma``
+    belongs to.
+    """
     series = []
     for gen in sorted(summary):
         for pick in summary[gen].get("picks", []):
             density = pick.get("density", float("nan"))
-            if math.isfinite(density):
-                series.append({
-                    "gen": gen,
-                    "density": density,
-                    "sigma": pick.get("sigma", float("nan")),
-                    "dft": pick.get("dft", float("nan")),
-                })
+            density_gp = pick.get("density_gp", float("nan"))
+            if not (math.isfinite(density) or math.isfinite(density_gp)):
+                continue
+            series.append({
+                "gen": gen,
+                "density": density,
+                "density_gp": density_gp,
+                "sigma": pick.get("sigma", float("nan")),
+                "dft": pick.get("dft", float("nan")),
+            })
     return series
 
 
@@ -387,53 +396,78 @@ def _convergence_figure(ei_series):
                      fontweight="bold")
         return fig, ax
 
-    gens = [entry["gen"] for entry in ei_series]
-    dens = [entry["density"] for entry in ei_series]
-    sigmas = [entry["sigma"] for entry in ei_series]
-
-    # best-so-far as generations advance
-    running, best = float("-inf"), []
-    for value in dens:
-        running = max(running, value)
-        best.append(running)
-    ax.step(gens, best, where="post", color="#1a5276", lw=2.0, zorder=4,
-            label="best so far")
-
-    # the GP uncertainty (±1.96σ) on each EI-selected density, as error bars
-    ax.errorbar(gens, dens, yerr=sigmas, fmt="o", color="#27ae60",
-                ecolor="#1e8449", elinewidth=1.2, capsize=3, ms=7, zorder=5,
-                label=r"EI-selected density $\pm$1.96$\sigma$")
-
-    # the reference measurement of the same crystal, drawn next to the ML value
-    dft_dens, dft_gens = [], []
+    # best-so-far as generations advance, on the density the search computed
+    # (Individuals): a circular dot at every EI pick, joined by straight lines.
+    ml_gens, best, running = [], [], float("-inf")
     for entry in ei_series:
-        if math.isfinite(entry["dft"]):
-            dft_dens.append(entry["dft"])
-            dft_gens.append(entry["gen"])
-            ax.plot([entry["gen"], entry["gen"]], [entry["density"], entry["dft"]],
+        if not math.isfinite(entry["density"]):
+            continue
+        running = max(running, entry["density"])
+        ml_gens.append(entry["gen"])
+        best.append(running)
+    if ml_gens:
+        ax.step(ml_gens, best, where="post", color="#1a5276", lw=1.6,
+                marker="o", ms=4, zorder=4,
+                label="best so far (Individuals density)")
+
+    # The ±1.96σ belongs to the GP mean, not to the MLP relaxation above: the
+    # bar is what EI traded against the improvement term, so it goes on μ.
+    gp = [(entry["gen"], entry["density_gp"], entry["sigma"])
+          for entry in ei_series if math.isfinite(entry["density_gp"])]
+    with_sigma = [(x, value, s) for x, value, s in gp if math.isfinite(s)]
+    if with_sigma:
+        ax.errorbar([x for x, _v, _s in with_sigma],
+                    [value for _x, value, _s in with_sigma],
+                    yerr=[s for _x, _v, s in with_sigma], fmt="s",
+                    color="#8e44ad", ecolor="#8e44ad", elinewidth=1.2,
+                    capsize=3, ms=6, zorder=6,
+                    label=r"GP prediction $\pm$1.96$\sigma$")
+    bare = [(x, value) for x, value, s in gp if not math.isfinite(s)]
+    if bare:
+        ax.scatter([x for x, _v in bare], [value for _x, value in bare],
+                   marker="s", s=30, color="#8e44ad", zorder=6,
+                   label=r"GP prediction $\pm$1.96$\sigma$")
+
+    # the reference measurement of the same crystal: a dashed bracket joins the
+    # prediction EI trusted and what that crystal really measures
+    for entry in ei_series:
+        if not math.isfinite(entry["dft"]):
+            continue
+        values = [v for v in (entry["density_gp"], entry["dft"])
+                  if math.isfinite(v)]
+        if len(values) >= 2:
+            ax.plot([entry["gen"], entry["gen"]], [min(values), max(values)],
                     color="#7f8c8d", lw=0.8, ls="--", alpha=0.7, zorder=3)
+    dft_dens = [entry["dft"] for entry in ei_series if math.isfinite(entry["dft"])]
     if dft_dens:
-        ax.scatter(dft_gens, dft_dens, marker="D", s=50, color="#c0392b",
-                   edgecolors="#641e16", linewidths=0.8, zorder=6,
-                   label="DFT density of selected")
+        ax.scatter([entry["gen"] for entry in ei_series
+                    if math.isfinite(entry["dft"])], dft_dens, marker="D", s=50,
+                   color="#c0392b", edgecolors="#641e16", linewidths=0.8,
+                   zorder=7, label="DFT density of selected")
 
     ax.set_xlabel("Generation")
     ax.set_ylabel(r"Density (g/cm$^3$)")
     ax.set_title("EI selection trend across generations", fontsize=12,
                  fontweight="bold")
-    ax.set_xticks(sorted(set(gens)))
+    ax.set_xticks(sorted({entry["gen"] for entry in ei_series}))
     ax.grid(True, alpha=0.25, linestyle="--")
-    ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
+    handles, labels = ax.get_legend_handles_labels()
+    seen = {}
+    for handle, label in zip(handles, labels):
+        seen.setdefault(label, handle)
+    ax.legend(seen.values(), seen.keys(), loc="lower right", fontsize=9,
+              framealpha=0.9)
     return fig, ax
 
 
 def plot_convergence(ei_series, out_png):
     """EI selection trend: x = generation, y = density, with GP uncertainty bars.
 
-    Every EI-labelled crystal is a green dot at its generation, with the GP
-    uncertainty (±1.96σ on the density) as an error bar; the blue step line is
-    the best density found so far as generations advance, and a red diamond is
-    the DFT reference of that same crystal.
+    Every EI-labelled crystal is a purple square at its generation: the GP
+    prediction EI ranked on, carrying the ±1.96σ error bar.  Dots joined by a
+    line are the best density found so far (from Individuals), and a red diamond
+    -- tied to its prediction by a dashed bracket -- is the DFT reference of the
+    same crystal.
     """
     try:
         fig, ax = _convergence_figure(ei_series)

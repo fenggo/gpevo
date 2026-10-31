@@ -90,6 +90,31 @@ def test_pred_reuses_a_cached_feature_without_running_reaxff(run, monkeypatch):
     assert calls["feature"] == 2 * 4            # 4 GULP runs each, none for #2
 
 
+def test_pred_without_ids_keeps_the_low_density_crystals(run, monkeypatch):
+    """pred() no longer drops crystals below the density threshold: only the
+    fitness gates them, so a low-density crystal still gets its row in
+    density_predict.log."""
+    res_folder, _data_dir = run
+    _stub_features(monkeypatch)
+    with open(os.path.join(res_folder, "Individuals"), "w") as fd:
+        fd.write("Gen   ID    Origin   Composition    Enthalpy   Volume  "
+                 "Density   Fitness\n")
+        for cid, density, fitness in ((1, 1.700, -1.700),   # below the default
+                                      (2, 1.800, -1.800),   # density threshold
+                                      (3, 1.950, 0.500)):   # discarded fitness
+            fd.write("  5 {:5d}   Random    -1.630  1307.324   {:.3f}     "
+                     "{:.3f} 1 0.315 3.465 1.525\n".format(cid, density, fitness))
+
+    previous = os.getcwd()
+    try:
+        os.chdir(res_folder)
+        results = core.pred(t="Individuals.traj", dat="data", step=1, ncpu=1)
+    finally:
+        os.chdir(previous)
+
+    assert sorted(results) == [1, 2]
+
+
 def test_pred_reads_the_database_once_per_call(run, monkeypatch):
     res_folder, data_dir = run
     _stub_features(monkeypatch)
