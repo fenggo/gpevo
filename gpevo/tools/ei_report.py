@@ -546,12 +546,43 @@ def _first(existing, *candidates):
     return existing
 
 
-def ei_report(path=".", out=None, trials=200, quiet=False):
+def _results_dirs(run_dir):
+    """The existing ``results<N>`` folders of *run_dir*, ordered by N."""
+    found = []
+    try:
+        names = os.listdir(run_dir)
+    except OSError:
+        return found
+    for name in names:
+        match = re.fullmatch(r"results(\d+)", name)
+        if match and os.path.isdir(os.path.join(run_dir, name)):
+            found.append((int(match.group(1)), name))
+    return [os.path.join(run_dir, name) for _, name in sorted(found)]
+
+
+def resolve_results_dir(run_dir, which=None):
+    """The folder of *run_dir* the report reads: ``results<N>`` or *run_dir*.
+
+    *which* selects one explicitly, either as ``results2`` or as ``2``.
+    Without it the **newest** ``results<N>`` wins, since that is the run that
+    most recently wrote an ``ei.log``; runs that wrote everything into the
+    home directory (no ``results<N>`` at all) fall back to *run_dir*.
+    """
+    if which is not None:
+        token = str(which).strip()
+        candidate = os.path.join(
+            run_dir, token if token.startswith("results") else f"results{token}")
+        if not os.path.isdir(candidate):
+            raise SystemExit(f"ei-report: {candidate} is not a directory")
+        return candidate
+    dirs = _results_dirs(run_dir)
+    return dirs[-1] if dirs else run_dir
+
+
+def ei_report(path=".", out=None, trials=200, quiet=False, results=None):
     """Write the three figures of *path* and print the per-generation report."""
     run_dir = os.path.abspath(path)
-    res_dir = os.path.join(run_dir, "results1")
-    if not os.path.isdir(res_dir):
-        res_dir = run_dir
+    res_dir = resolve_results_dir(run_dir, results)
 
     individuals = _first(None, os.path.join(res_dir, "Individuals"),
                          os.path.join(run_dir, "Individuals"))
@@ -564,7 +595,10 @@ def ei_report(path=".", out=None, trials=200, quiet=False):
                                         os.path.join(run_dir, "density_predict.log")))
     dft = parse_density_log(_first(None, os.path.join(res_dir, "density.log"),
                                    os.path.join(run_dir, "density.log")))
-    ei_log = parse_ei_log(os.path.join(run_dir, "ei.log"))
+    # ei.log lives in the run's results<N> now; the home-directory copy is
+    # only the fallback for runs finished before that move.
+    ei_log = parse_ei_log(_first(None, os.path.join(res_dir, "ei.log"),
+                                 os.path.join(run_dir, "ei.log")))
     learning = parse_learning_curve(_first(None, os.path.join(run_dir, "log"),
                                            os.path.join(run_dir, "OUTPUT.txt")))
 
@@ -597,7 +631,10 @@ def main(argv=None):
                     "GPEvo run directory.")
     parser.add_argument("-p", "--path", default=".", help="run directory")
     parser.add_argument("--out", default=None,
-                        help="output prefix (default <run>/results1/ei_report)")
+                        help="output prefix (default <run>/results<N>/ei_report)")
+    parser.add_argument("--results", default=None,
+                        help="results folder to read, e.g. 2 or results2 "
+                             "(default: the newest results<N>)")
     parser.add_argument("--trials", type=int, default=200,
                         help="random-selection draws of the convergence baseline")
     parser.add_argument("-n", "--dry-run", action="store_true",
@@ -605,10 +642,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.dry_run:
-        text = ei_report(path=args.path, trials=args.trials, quiet=True)
+        text = ei_report(path=args.path, trials=args.trials, quiet=True,
+                         results=args.results)
         print(text)
         return 0
-    ei_report(path=args.path, out=args.out, trials=args.trials)
+    ei_report(path=args.path, out=args.out, trials=args.trials,
+              results=args.results)
     return 0
 
 

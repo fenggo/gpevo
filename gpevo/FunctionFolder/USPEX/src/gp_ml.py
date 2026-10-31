@@ -447,8 +447,17 @@ def _read_gp_csv(path):
 
 
 def _write_ei_log(ORG, generation, crystals):
-    """Append the EI-selected crystal ids to ``<homePath>/ei.log``."""
-    path = os.path.join(getattr(ORG, "homePath", os.getcwd()), "ei.log")
+    """Append the EI-selected crystal ids to ``<resFolder>/ei.log``.
+
+    The log belongs to the run that produced it, so it sits in that run's
+    ``results<N>`` next to ``Individuals`` and the density logs, not in the
+    home directory.  A following run opens its own ``results<N+1>`` and
+    therefore starts with an empty log instead of inheriting the selections
+    of the previous one.
+    """
+    res = (getattr(ORG, "resFolder", "") or getattr(ORG, "homePath", "")
+           or os.getcwd())
+    path = os.path.join(res, "ei.log")
     ids = " ".join(str(int(c)) for c in crystals)
     try:
         with open(path, "a", encoding="utf-8") as fp:

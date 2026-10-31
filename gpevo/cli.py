@@ -43,7 +43,10 @@ def _build_parser():
     )
     parser_ei.add_argument("-p", "--path", default=".", help="run directory")
     parser_ei.add_argument("--out", default=None,
-                           help="output prefix (default <run>/results1/ei_report)")
+                           help="output prefix (default <run>/results<N>/ei_report)")
+    parser_ei.add_argument("--results", default=None,
+                           help="results folder to read, e.g. 2 or results2 "
+                                "(default: the newest results<N>)")
     parser_ei.add_argument("--trials", type=int, default=200,
                            help="random-selection draws of the convergence baseline")
     parser_ei.add_argument("-n", "--dry-run", action="store_true",
@@ -65,9 +68,11 @@ def main(argv=None):
     if args.command == "ei-report":
         from gpevo.tools.ei_report import ei_report
         if args.dry_run:
-            print(ei_report(path=args.path, trials=args.trials, quiet=True))
+            print(ei_report(path=args.path, trials=args.trials, quiet=True,
+                            results=args.results))
         else:
-            ei_report(path=args.path, out=args.out, trials=args.trials)
+            ei_report(path=args.path, out=args.out, trials=args.trials,
+                      results=args.results)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
