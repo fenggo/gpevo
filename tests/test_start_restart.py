@@ -76,6 +76,86 @@ def _workspace(tmp_path, monkeypatch):
     G["ORG_STRUC"] = None
 
 
+def _record(gen):
+    from gpevo.runtime import AttrDict
+
+    record = AttrDict()
+    record.gen = gen
+    return record
+
+
+def _uspex(population):
+    from gpevo.runtime import AttrDict
+
+    uspex = AttrDict()
+    uspex.POPULATION = population
+    uspex.GENERATION = []
+    return uspex
+
+
+def _snapshots(tmp_path, generations):
+    """Write generation<N>/USPEX.pkl of a stopped run."""
+    from gpevo.runtime import safesave
+
+    res = tmp_path / "results1"
+    for number, population in generations:
+        folder = res / f"generation{number}"
+        folder.mkdir(parents=True, exist_ok=True)
+        safesave(str(folder / "USPEX.pkl"), _uspex(population))
+
+
+def test_restart_reloads_the_cumulative_record(tmp_path):
+    """Individuals is rewritten from USPEX.POPULATION: a restart must not start
+    it empty, or every generation before the restart disappears."""
+    from gpevo.runtime import AttrDict
+
+    from gpevo.FunctionFolder.USPEX.Start import _restore_uspex_struc
+
+    # the snapshot written after the earlier restart holds only its own
+    # generation, the structures before it are gone (None)
+    _snapshots(tmp_path, ((1, [_record(1)] * 3),
+                          (2, [None, None, None, _record(2), _record(2)])))
+    POP = AttrDict()
+    POP.resFolder = str(tmp_path / "results1")
+    POP.generation = 3
+
+    uspex = _restore_uspex_struc(POP)
+
+    assert uspex is not None
+    assert [record.gen for record in uspex.POPULATION] == [1, 1, 1, 2, 2]
+
+
+def test_restart_ignores_the_snapshot_of_the_generation_being_redone(tmp_path):
+    """A half-written snapshot of the current generation is not a source."""
+    from gpevo.runtime import AttrDict
+
+    from gpevo.FunctionFolder.USPEX.Start import _restore_uspex_struc
+
+    _snapshots(tmp_path, ((1, [_record(1)] * 3),
+                          (2, [_record(2), _record(2)])))
+    POP = AttrDict()
+    POP.resFolder = str(tmp_path / "results1")
+    POP.generation = 2
+
+    uspex = _restore_uspex_struc(POP)
+
+    assert [record.gen for record in uspex.POPULATION] == [1, 1, 1]
+
+
+def test_restart_finds_the_snapshots_of_a_run_that_moved(tmp_path):
+    """A copied run keeps the absolute resFolder of the machine it started on;
+    the results folder of the current directory is then the only source."""
+    from gpevo.runtime import AttrDict
+
+    from gpevo.FunctionFolder.USPEX.Start import _uspex_snapshots
+
+    _snapshots(tmp_path, ((1, [_record(1)] * 2),))
+    POP = AttrDict()
+    POP.resFolder = "/somewhere/else/results1"   # stale, from the other machine
+
+    assert [n for n, _path in _uspex_snapshots(POP)] == [1]
+
+
 def test_restart_applies_the_edited_gp_gates(tmp_path):
     """den/u/explore edited while the run was stopped must take effect."""
     _input_file(tmp_path, den="1.75", u="0.06", explore="0")

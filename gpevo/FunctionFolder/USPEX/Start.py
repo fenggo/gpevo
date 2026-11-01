@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from importlib import import_module as _im
 
@@ -118,6 +119,94 @@ def _refresh_input_options(input_file="INPUT.txt"):
     return ORG
 
 
+def _results_dir(home):
+    """The newest results<N> of home, or '' when there is none."""
+    best, number = "", -1
+    try:
+        names = os.listdir(home)
+    except OSError:
+        return ""
+    for name in names:
+        match = re.fullmatch(r"results(\d+)", name)
+        if match and int(match.group(1)) > number:
+            path = os.path.join(home, name)
+            if os.path.isdir(path):
+                number = int(match.group(1))
+                best = path
+    return best
+
+
+def _uspex_snapshots(POP):
+    """[(generation, path), ...] of the per-generation USPEX checkpoints."""
+    res = getattr(POP, "resFolder", None) or ""
+    if not os.path.isdir(res):
+        # A run moved to another machine keeps the absolute resFolder of the
+        # machine it started on; the results folder of the current directory is
+        # then the only one that can hold its snapshots.
+        res = _results_dir(os.getcwd())
+    if not res:
+        return []
+    found = []
+    for name in os.listdir(res):
+        match = re.fullmatch(r"generation(\d+)", name)
+        if not match:
+            continue
+        path = os.path.join(res, name, "USPEX.pkl")
+        if os.path.isfile(path):
+            found.append((int(match.group(1)), path))
+    return sorted(found)
+
+
+def _restore_uspex_struc(POP):
+    """The cumulative record a restart has to continue from, or None.
+
+    USPEX_STRUC.POPULATION is the one place every structure ever relaxed is
+    remembered: WriteIndividual rewrites Individuals from it.  It is checkpointed
+    per generation (generation<N>/USPEX.pkl), not in Current_POP.pkl, so a
+    restart that never loaded it started with an empty record -- and the next
+    WriteIndividual then dropped every generation before the restart from the
+    table.
+
+    The newest snapshot that still starts at structure 1 is the base (a snapshot
+    written after such a restart holds only its own generation), and the
+    structures the newer snapshots know about are merged back in, so a
+    generation that was already finished before the restart is not lost either.
+    """
+    from gpevo.runtime import safeload
+
+    snapshots = _uspex_snapshots(POP)
+    if not snapshots:
+        return None
+    generation = int(getattr(POP, "generation", 0) or 0)
+    # a snapshot of the generation being restarted may still be half-written
+    usable = [(n, p) for n, p in snapshots if n < generation] or snapshots
+
+    base = None
+    for number, path in reversed(usable):
+        uspex = safeload(path)
+        population = list(getattr(uspex, "POPULATION", []) or [])
+        if population and population[0] is not None:
+            base = (number, uspex)
+            break
+    if base is None:
+        return None
+
+    number, uspex = base
+    merged = list(uspex.POPULATION)
+    for later, path in usable:
+        if later <= number:
+            continue
+        other = safeload(path)
+        for index, record in enumerate(getattr(other, "POPULATION", []) or []):
+            if record is None:
+                continue
+            while len(merged) <= index:
+                merged.append(None)
+            merged[index] = record
+    uspex.POPULATION = merged
+    return uspex
+
+
 def Start():
     _setup_rng(None)
 
@@ -145,6 +234,12 @@ def Start():
         # vector sized for numMols instead of numIons.
         ORG = _refresh_input_options("INPUT.txt")
         G["ORG_STRUC"] = ORG
+        # The cumulative record lives in the per-generation snapshots only, so
+        # a restart has to put it back or Individuals loses every generation
+        # before the restart the next time it is written.
+        USPEX = _restore_uspex_struc(POP)
+        if USPEX is not None:
+            G["USPEX_STRUC"] = USPEX
         # Reprocess already-relaxed individuals from a finished checkpoint so
         # restarted runs no longer keep N/A descriptor columns.
         from gpevo.FunctionFolder.sys.fingerprint_utils import compute_structure_metrics
