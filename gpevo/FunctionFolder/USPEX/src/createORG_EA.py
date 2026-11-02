@@ -98,6 +98,13 @@ def createORG_EA(inputFile):
     raw = p.scalar("RL_strategy")
     if raw is not None:
         ORG.RL_strategy = int(float(raw))
+    # Which continuous amplitudes the inner bandit may move: "angle" leaves
+    # translationMax / mutationRate / softStepScale at their INPUT.txt value,
+    # which is what a single-parameter ablation needs.  Free text, so it is
+    # read with p.option (both "angle : RL_inner" and "RL_inner : angle" work).
+    raw = p.option("RL_inner")
+    if raw is not None:
+        ORG.RL_inner = str(raw)
     for name, cast in (
         ("RL_forget", float), ("RL_w1", float), ("RL_w2", float),
         ("RL_armCap", float), ("RL_kappa", float), ("RL_autoExport", int),

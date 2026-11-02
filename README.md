@@ -276,6 +276,7 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 0.6    : RL_armCap      % 单个算子占比上限
 1.0    : RL_kappa       % 内层探索系数，越大幅度探索越激进
 1      : RL_autoExport  % 导出跨任务先验
+angle  : RL_inner       % 内层只动旋转角，其余三个保持 INPUT 的值（默认 all）
 ```
 
 内层学的四个连续参数，也都有 INPUT 入口（`RL_strategy=0` 时**直接固定为你设的值**；开启 RL 时作为**学习起点**）：
@@ -288,6 +289,29 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 ```
 
 RL 开启时的搜索范围固定为：角度 15°–90°、平移 0.1–0.8、应变 0.05–0.30、步长缩放 0.5–2.0（超出的设置值会被夹到区间端点）。
+
+### 只让 RL 学一个参数（`RL_inner`）
+
+默认（`RL_inner` 缺省或 `all`）内层每代对**四个**幅度一起做 Thompson 采样，想做单参数消融就要把它们分开——`RL_inner` 逐个点名，没点到的保持 INPUT 里的固定值：
+
+```
+angle        : RL_inner   % 只学 rotationAngleMax（平移/应变/步长固定）
+translation  : RL_inner   % 只学 translationMax
+mutation     : RL_inner   % 只学 mutationRate
+softstep     : RL_inner   % 只学 softStepScale
+rotate       : RL_inner   % arm 4 的两个一起学（角度 + 平移）
+angle,softstep : RL_inner % 多个用逗号/空格分隔（不要写成 "angle, softstep"）
+none         : RL_inner   % 内层完全不学，四个都用 INPUT 的固定值
+```
+
+识别不分大小写（也认 `all` / `on` / `1`、`none` / `off` / `0`、以及 `latmut` / `softmut`），拼错的名字会告警并退回 `all`。
+
+于是「只测旋转角」的写法就是：`1 : RL_strategy` + `angle : RL_inner` + 把另外三个写成你要的固定值。注意两点：
+
+- 外层 6 臂 bandit 仍在学算子配额（想把它也定住，只能 `0 : RL_strategy` 走固定值扫描）；
+- 对照实验要换独立目录或先删 `rl_agent_state.pkl`（存在时 INPUT 的初值不再生效），并把 `RLPriors/operator_prior.pkl` 与 `~/.config/uspex-gp/RLPriors/operator_prior.pkl` 挪开，否则先验会覆盖起点。
+
+角度的实际取值是 `±rotationAngleMax/3`（`Rotation_310.py:40`），设 90° 实际是 ±30°；每代采到的 `u`（角度 = `15° + u×75°`）记在 `rl_agent_state.pkl` 的 `history` 里。
 
 ## 分析与绘图工具
 
@@ -371,6 +395,7 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 | `uq_active_learning.md` / `uq_active_learning_flowchart.md` | GP 主动学习（UQ）流程 |
 | `fingerprint_method.md` | 指纹方法说明 |
 | `rl_bandit_design.md` | 强化学习 bandit 设计 |
+| `molecule_damage_check.md` | 分子损坏检测的三道检查、1.780 Å 分子间 N–N 键漏检的原因与改进建议 |
 | `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
 
 ## 与 MATLAB 版的关系

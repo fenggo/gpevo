@@ -96,6 +96,7 @@ def createORGDefault():
     ORG.RL_armCap = 0.6
     ORG.RL_kappa = 1.0
     ORG.RL_autoExport = 1
+    ORG.RL_inner = "all"          # inner amplitudes the bandit may move
     ORG.rotationAngleMax = math.pi / 2
     ORG.translationMax = 0.5
     # Rigid-body swarm move (`fracSwarm : ...`): 0 disables it, so the default

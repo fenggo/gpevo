@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import os
 import pickle
+import re
 
 import numpy as np
 
@@ -30,6 +31,62 @@ MUT_HI = 0.30
 LOG_SCALE_LO = math.log(0.5)
 LOG_SCALE_HI = math.log(2.0)
 INNER_BASE_SD = 0.05
+
+# The four continuous amplitudes the inner sampler can move, as (arm, inner
+# index): arm 4 is Rotate (rotation angle, rigid translation), arm 5 LatMutate
+# (strain), arm 6 softmutate (step scale).  RL_inner names them one by one, so a
+# run can let the bandit move just the rotation angle and keep the other three
+# at whatever INPUT.txt set -- that is what makes a single-parameter ablation
+# possible.
+INNER_TOKENS = {
+    "angle": [(4, 0)],
+    "rotation": [(4, 0)],
+    "rotationangle": [(4, 0)],
+    "rotate": [(4, 0), (4, 1)],
+    "translation": [(4, 1)],
+    "trans": [(4, 1)],
+    "latmut": [(5, 0)],
+    "latmutate": [(5, 0)],
+    "mutation": [(5, 0)],
+    "mutationrate": [(5, 0)],
+    "strain": [(5, 0)],
+    "softmut": [(6, 0)],
+    "softmutate": [(6, 0)],
+    "softstep": [(6, 0)],
+    "softstepscale": [(6, 0)],
+}
+INNER_ALL = {(4, 0), (4, 1), (5, 0), (6, 0)}
+INNER_LABEL = {(4, 0): "rotationAngleMax", (4, 1): "translationMax",
+               (5, 0): "mutationRate", (6, 0): "softStepScale"}
+
+
+def _inner_params(ORG):
+    """The (arm, inner index) pairs the sampler is allowed to move.
+
+    RL_inner : angle restricts it to the rotation angle; the amplitudes left out
+    keep the value INPUT.txt gave them.  Without RL_inner (or with all) every
+    amplitude is sampled, which is the behaviour up to now.
+    """
+    raw = getattr(ORG, "RL_inner", None)
+    if raw is None:
+        return set(INNER_ALL)
+    text = str(raw).strip().lower()
+    if not text or text in ("all", "1", "on"):
+        return set(INNER_ALL)
+    if text in ("none", "off", "0"):
+        return set()
+    chosen = set()
+    for token in re.split(r"[,;\s+]+", text):
+        if not token:
+            continue
+        pairs = INNER_TOKENS.get(token)
+        if pairs is None:
+            console_print("  RL bandit: RL_inner token '" + token + "' unknown "
+                          "(angle | translation | mutation | softstep | rotate |"
+                          " latmut | softmut | all | none)")
+            continue
+        chosen.update(pairs)
+    return chosen or set(INNER_ALL)
 
 
 def which_arm(how_come):
@@ -231,19 +288,29 @@ def RL_agent(popSize):
     f = safe_fractions(f, arm_cap)
 
     # ---- inner continuous Thompson sampling for arms 4/5/6 ---------------
+    # Only the amplitudes RL_inner selected; the others stay at the value
+    # INPUT.txt set, so a run can ablate one of them on its own.
+    inner_params = _inner_params(ORG)
     next_u = np.full((K, 2), np.nan)
-    for arm in (4, 5, 6):
-        for k in range(NP[arm - 1]):
-            cell = state["inner"][arm - 1][k]
-            sd = kappa / math.sqrt(max(float(cell["neff"]), 1e-12)) + INNER_BASE_SD
-            value = float(cell["m"]) + sd * float(np.random.randn())
-            next_u[arm - 1, k] = min(1.0, max(0.0, value))
+    for arm, k in sorted(inner_params):
+        cell = state["inner"][arm - 1][k]
+        sd = kappa / math.sqrt(max(float(cell["neff"]), 1e-12)) + INNER_BASE_SD
+        value = float(cell["m"]) + sd * float(np.random.randn())
+        next_u[arm - 1, k] = min(1.0, max(0.0, value))
     state["lastU"] = next_u
 
-    ORG.rotationAngleMax = ANGLE_LO + float(next_u[3, 0]) * (ANGLE_HI - ANGLE_LO)
-    ORG.translationMax = TRANS_LO + float(next_u[3, 1]) * (TRANS_HI - TRANS_LO)
-    ORG.mutationRate = MUT_LO + float(next_u[4, 0]) * (MUT_HI - MUT_LO)
-    ORG.softStepScale = math.exp(LOG_SCALE_LO + float(next_u[5, 0]) * (LOG_SCALE_HI - LOG_SCALE_LO))
+    if (4, 0) in inner_params:
+        ORG.rotationAngleMax = ANGLE_LO + float(next_u[3, 0]) * (ANGLE_HI - ANGLE_LO)
+    if (4, 1) in inner_params:
+        ORG.translationMax = TRANS_LO + float(next_u[3, 1]) * (TRANS_HI - TRANS_LO)
+    if (5, 0) in inner_params:
+        ORG.mutationRate = MUT_LO + float(next_u[4, 0]) * (MUT_HI - MUT_LO)
+    if (6, 0) in inner_params:
+        ORG.softStepScale = math.exp(LOG_SCALE_LO + float(next_u[5, 0])
+                                     * (LOG_SCALE_HI - LOG_SCALE_LO))
+    if inner_params != INNER_ALL:
+        names = ", ".join(sorted(INNER_LABEL[pair] for pair in inner_params))
+        console_print("  RL bandit: inner = " + (names if names else "none"))
 
     state.setdefault("history", []).append(
         {
