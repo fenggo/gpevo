@@ -24,9 +24,9 @@ def Rotation_310(count):
         # Breathing lattice (Rotation_310.m:38-45): the cell is expanded and the
         # molecules move outward with it.  Only the molecular centres are
         # scaled -- scaling MOLCOORS would stretch every intramolecular bond by
-        # 5-15%, which a reactive force field then relaxes (or breaks) instead
+        # 10-20%, which a reactive force field then relaxes (or breaks) instead
         # of just re-packing the structure.
-        breath_factor = 1.05 + np.random.rand() * 0.10
+        breath_factor = 1.10 + np.random.rand() * 0.10
         breath_lattice = np.asarray(child.LATTICE, dtype=float) * breath_factor
         child.LATTICE = breath_lattice
         for mol in child.MOLECULES:
