@@ -138,7 +138,9 @@ def createORGDefault():
     ORG.STDMOL = []
     ORG.CenterminDistMatrice = []
     ORG.minDistMatrice = []
-    ORG.goodBonds = None
+    ORG.goodBonds = None       # set from calcDefaultGoodBonds in createORG_System
+    ORG.valences = []          # per-species formal valences (soft modes)
+    ORG.NvalElectrons = []     # per-species valence electron counts (soft modes)
     ORG.nsym = []
     ORG.resFolder = ""
     ORG.pickedUP = 0

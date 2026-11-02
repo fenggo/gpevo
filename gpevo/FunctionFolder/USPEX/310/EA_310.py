@@ -108,6 +108,10 @@ def EA_310():
         OFF.resFolder = getattr(POP, "resFolder", ORG.resFolder)
         OFF.ranking = list(POP.ranking)
         OFF.DoneOrder = []
+        # MATLAB does OFF_STRUC = POP_STRUC (then clears POPULATION), so the
+        # soft-mode parent cache and SOFTMUTATED flag survive the generation.
+        OFF.SOFTMODEParents = list(getattr(POP, "SOFTMODEParents", []) or [])
+        OFF.SOFTMUTATED = list(getattr(POP, "SOFTMUTATED", []) or [])
         G["OFF_STRUC"] = OFF
 
         # Variation operators are invoked in the same order and with the same

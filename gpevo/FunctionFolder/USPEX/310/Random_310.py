@@ -4,7 +4,9 @@ from __future__ import annotations
 from importlib import import_module as _im
 
 from gpevo.runtime import G, AttrDict
-from gpevo.FunctionFolder.USPEX.src.variation_common import finalize_offspring, valid_molecules
+from gpevo.FunctionFolder.USPEX.src.variation_common import (
+    finalize_offspring, recompute_zmatrix, valid_molecules,
+)
 
 
 def Random_310(count):
@@ -28,6 +30,7 @@ def Random_310(count):
         ind.howCome = "  Random  "
         if not valid_molecules(ind, 0):
             continue
+        recompute_zmatrix(ind)
         final = finalize_offspring(ind, "  Random  ")
         G["OFF_STRUC"].POPULATION.append(final)
         return

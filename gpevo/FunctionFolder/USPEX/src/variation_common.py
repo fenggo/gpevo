@@ -12,6 +12,47 @@ def copy_individual(ind):
     return copy.deepcopy(ind)
 
 
+def recompute_zmatrix(ind):
+    """Refresh ``mol.ZMATRIX`` from ``MOLCOORS`` after a variation move.
+
+    MATLAB's 310 operators recompute the Z-matrix of every molecule on the
+    successful offspring (e.g. ``LatMutation_310.m:42``,
+    ``Mutation_310.m:53``, ``Permutation_310.m:86``).  Leaving the parent's
+    ZMATRIX on the child makes it stale: ``move_all_mol_Mutation`` reads
+    ``ZMATRIX(1,:)`` as the molecule centre, so a stale value feeds wrong
+    displacements into the soft-mode / coordinate-mutation fallbacks.
+
+    ``ind`` needs ``MOLECULES`` and ``MtypeLIST``; ``ORG.STDMOL`` supplies each
+    molecule's ``format``.  Molecules whose template is unavailable keep a
+    coordinate-based fallback so ``ZMATRIX[0]`` is at least current.
+    """
+    ORG = G.get("ORG_STRUC")
+    stdmol = getattr(ORG, "STDMOL", None) if ORG is not None else None
+    mt_attr = getattr(ind, "MtypeLIST", None)
+    mtype_list = list(mt_attr) if mt_attr is not None else []
+    mols_attr = getattr(ind, "MOLECULES", None)
+    molecules = list(mols_attr) if mols_attr is not None else []
+    if not molecules:
+        return ind
+    from gpevo.FunctionFolder.USPEX.src.NEW_coord2Zmatrix import NEW_coord2Zmatrix
+
+    for j, mol in enumerate(molecules):
+        coords = np.asarray(mol.MOLCOORS, dtype=float)
+        fmt = None
+        if stdmol is not None and len(stdmol) and j < len(mtype_list):
+            mt = int(mtype_list[j])
+            if 1 <= mt <= len(stdmol):
+                fmt = getattr(stdmol[mt - 1], "format", None)
+        if fmt is None:
+            mol.ZMATRIX = coords.copy()
+            continue
+        try:
+            mol.ZMATRIX = np.real(NEW_coord2Zmatrix(coords, fmt))
+        except Exception:
+            mol.ZMATRIX = coords.copy()
+    return ind
+
+
 def append_off(ind):
     OFF = G["OFF_STRUC"]
     OFF.POPULATION.append(ind)

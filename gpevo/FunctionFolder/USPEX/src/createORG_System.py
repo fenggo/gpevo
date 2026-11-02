@@ -32,11 +32,15 @@ def elementID(symbol):
 
 
 def valence_el(symbol):
-    return 0
+    """valence.m -- formal valence by element symbol."""
+    from gpevo.FunctionFolder.USPEX.src.softmode import valence
+    return valence(elementID(symbol))
 
 
 def valenceElectronsNumber(atomic_number):
-    return 0
+    """valenceElectronsNumber.m -- valence electron count by atomic number."""
+    from gpevo.FunctionFolder.USPEX.src.softmode import valence_electrons
+    return valence_electrons(atomic_number)
 
 
 def createORG_System(inputFile):
@@ -145,8 +149,34 @@ def createORG_System(inputFile):
             for i in range(min(n, len(rows))):
                 for j in range(min(n, len(rows[i] if isinstance(rows[i], list) else []))):
                     M[i, j] = rows[i][j]
+            # MATLAB symmetrises the upper triangle (createORG_System.m:242-245).
+            M = np.triu(M) + np.triu(M, 1).T
         ORG.goodBonds = M
     else:
-        ORG.goodBonds = None
+        # calcDefaultGoodBonds.m: sqrt(gB_i * gB_j).
+        from gpevo.FunctionFolder.USPEX.src.softmode import default_good_bonds
+        ORG.goodBonds = default_good_bonds(ORG.atomType)
+
+    # valences / valenceElectr blocks (createORG_System.m:112-143).  The soft
+    # mode force constants need per-species formal valences and valence electron
+    # counts; defaults come from the MATLAB lookup tables when no block is given.
+    from gpevo.FunctionFolder.USPEX.src.softmode import valence
+    n = len(ORG.atomType)
+    val_block = p.block("valences", "EndValences")
+    if val_block:
+        vals = scannum(" ".join(val_block))
+        ORG.valences = np.asarray(vals if isinstance(vals, (list, tuple)) else [vals], dtype=float)
+    else:
+        ORG.valences = np.array([valence(z) for z in ORG.atomType], dtype=float)
+    nval_block = p.block("valenceElectr", "EndValenceElectr")
+    if nval_block:
+        vals = scannum(" ".join(nval_block))
+        ORG.NvalElectrons = np.asarray(vals if isinstance(vals, (list, tuple)) else [vals], dtype=float)
+    else:
+        ORG.NvalElectrons = np.array([valenceElectronsNumber(z) for z in ORG.atomType], dtype=float)
+    if ORG.valences.size != n:
+        ORG.valences = np.array([valence(z) for z in ORG.atomType], dtype=float)
+    if ORG.NvalElectrons.size != n:
+        ORG.NvalElectrons = np.array([valenceElectronsNumber(z) for z in ORG.atomType], dtype=float)
 
     G["ORG_STRUC"] = ORG
