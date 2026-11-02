@@ -156,6 +156,27 @@ def read_molecules():
         mol.ZMATRIX = NEW_coord2Zmatrix(mol.molecule, mol.format)
 
         mol.num_optFlags = max(0, int(np.sum(mol.optFlags)) - 6)
+
+        # Flexible intramolecular dihedrals (MATLAB STDMOL(k).flex_dihedral):
+        # when an atom's dihedral optimisation flag (column 3 of optFlags, set
+        # from MOL-file column 7) is non-zero, the torsion around the bond
+        # (format[i,0] -- format[i,1]) is rotatable, with atom i (and its
+        # connected subtree) on the moving side.  Rotation_310 uses this to do a
+        # molecule-internal "group rotation" (e.g. a nitro group about C-N).
+        flex = []
+        fmt = mol.format
+        opt = mol.optFlags
+        for i in range(num_atoms):
+            if i < 2:
+                continue
+            if int(round(float(opt[i, 2]))) == 0:
+                continue
+            i1 = int(fmt[i, 0]) - 1
+            i2 = int(fmt[i, 1]) - 1
+            if 0 <= i1 < num_atoms and 0 <= i2 < num_atoms and i1 != i2:
+                flex.append((i1, i2, i))
+        mol.flex_dihedral = flex
+
         stdmol.append(mol)
 
     ORG.STDMOL = stdmol
