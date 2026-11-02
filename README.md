@@ -394,7 +394,8 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 | `ea_flowchart.md` / `ea_mechanism.png` / `draw_ea.py` | 进化算法流程图与绘制脚本 |
 | `uq_active_learning.md` / `uq_active_learning_flowchart.md` | GP 主动学习（UQ）流程 |
 | `fingerprint_method.md` | 指纹方法说明 |
-| `rl_bandit_design.md` | 强化学习 bandit 设计 |
+| `rl_bandit_design.md` | 强化学习 bandit 设计（原理推导 / 路线图） |
+| `rl_bandit_tutorial.md` | 强化学习模块使用教程（原理 + INPUT.txt 配置 / 单参数消融 / 解读） |
 | `molecule_damage_check.md` | 分子损坏检测的三道检查、1.780 Å 分子间 N–N 键漏检的原因与改进建议 |
 | `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
 
