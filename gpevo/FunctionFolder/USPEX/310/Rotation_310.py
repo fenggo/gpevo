@@ -75,7 +75,7 @@ def _twist_dihedrals(coords, flex, type_idxs, ref_bonds, max_iter=200):
         moved = False
         for it in range(max_iter):
             if it < max_iter / 3:
-                step = np.pi          # early: +-90 deg
+                step = np.pi * 0.5          # early: +-90 deg
             elif it < 2 * max_iter / 3:
                 step = np.pi / 3      # mid:   +-60 deg
             else:
