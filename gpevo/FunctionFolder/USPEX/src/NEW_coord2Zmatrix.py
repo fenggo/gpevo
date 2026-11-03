@@ -49,3 +49,98 @@ def NEW_coord2Zmatrix(coords, fmt):
         if abs(tors + math.pi) < 0.0001:
             z[ind, 2] = math.pi
     return z
+
+
+def _rot_mat(angle, axis):
+    """Rodrigues rotation matrix (matches NEW_ZMATRIXCOORD.m)."""
+    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
+    c = math.cos(angle)
+    s = math.sin(angle)
+    t = 1.0 - c
+    return np.array([
+        [c + x * x * t,     x * y * t - z * s, x * z * t + y * s],
+        [y * x * t + z * s, c + y * y * t,     y * z * t - x * s],
+        [z * x * t - y * s, z * y * t + x * s, c + z * z * t],
+    ])
+
+
+def _con_struct_coo(related, r, theta, phi):
+    """Build one atom from its 3 reference atoms (related: 3x3, rows = i, j, k)."""
+    xi, yi, zi = related[0]
+    xj, yj, zj = related[1]
+    xk, yk, zk = related[2]
+    xji = xi - xj; yji = yi - yj; zji = zi - zj
+    rji = math.sqrt(xji * xji + yji * yji + zji * zji)
+    xji = xji / rji; yji = yji / rji; zji = zji / rji
+    xki = xk - xj; yki = yk - yj; zki = zk - zj
+    xn = yji * zki - yki * zji
+    yn = zji * xki - zki * xji
+    zn = xji * yki - xki * yji
+    rn = math.sqrt(xn * xn + yn * yn + zn * zn)
+    xn = xn / rn; yn = yn / rn; zn = zn / rn
+    xp = yn * zji - yji * zn
+    yp = zn * xji - zji * xn
+    zp = xn * yji - xji * yn
+    rji = r * math.cos(theta)
+    rn = r * math.sin(theta) * math.sin(phi)
+    rp = r * math.sin(theta) * math.cos(phi)
+    x = xi - rji * xji + rn * xn + rp * xp
+    y = yi - rji * yji + rn * yn + rp * yp
+    z = zi - rji * zji + rn * zn + rp * zp
+    return np.array([x, y, z])
+
+
+def NEW_ZMATRIXCOORD(zmatrix, fmt):
+    """Python port of NEW_ZMATRIXCOORD.m (Z-matrix -> Cartesian coordinates)."""
+    z = np.asarray(zmatrix, dtype=float)
+    fmt = np.asarray(fmt, dtype=int)
+    n = z.shape[0]
+    if n == 1:
+        return z.copy()
+    teempi = z[0].copy()
+    z = z.copy()
+    z[0] = 0.0
+    coords = np.zeros((n, 3))
+    coords[0] = [0.0, 0.0, 0.0]
+    coords[1] = [z[1, 0], 0.0, 0.0]
+    if n > 2.5:
+        for ind in range(2, n):
+            if ind == 2:
+                related = np.array([
+                    [z[max(0, int(fmt[ind, 0]) - 1), 0], 0.0, 0.0],
+                    [z[max(0, int(fmt[ind, 1]) - 1), 0], 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ])
+            else:
+                form = [max(0, int(fmt[ind, 0]) - 1),
+                        max(0, int(fmt[ind, 1]) - 1),
+                        max(0, int(fmt[ind, 2]) - 1)]
+                related = coords[form]
+            r = z[ind, 0]
+            theta = z[ind, 1]
+            phi = z[ind, 2]
+            coords[ind] = _con_struct_coo(related, r, theta, phi)
+            if ind == 2:
+                for outer in range(2):
+                    if outer == 0:
+                        rot_vec = np.array([0.0, 1.0, 0.0])
+                        torsang = z[1, 1] - math.pi / 2.0
+                    else:
+                        rot_vec = np.array([0.0, 0.0, 1.0])
+                        torsang = z[1, 2]
+                    for inder in range(3):
+                        coords[inder] = _rot_mat(torsang, rot_vec) @ coords[inder]
+    elif n == 2:
+        for outer in range(2):
+            if outer == 0:
+                rot_vec = np.array([0.0, 1.0, 0.0])
+                torsang = z[1, 1] - math.pi / 2.0
+            else:
+                rot_vec = np.array([0.0, 0.0, 1.0])
+                torsang = z[1, 2]
+            for inder in range(2):
+                coords[inder] = _rot_mat(torsang, rot_vec) @ coords[inder]
+    coords[:, 0] += teempi[0]
+    coords[:, 1] += teempi[1]
+    coords[:, 2] += teempi[2]
+    return np.real(coords)
