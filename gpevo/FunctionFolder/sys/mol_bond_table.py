@@ -16,9 +16,11 @@ import numpy as np
 from gpevo.runtime import G
 from gpevo.FunctionFolder.sys.covalentRadius import covalentRadius
 
-# Cordero-style single-bond criterion: two atoms are bonded if their distance
-# is below the sum of their covalent radii plus this tolerance (Angstrom).
-BOND_TOL = 0.45
+# Single-bond criterion matching USPEX (find_pair.m): two atoms are bonded if
+# their distance is below 1.2 * (sum of their covalent radii).  The multiplicative
+# 1.2 factor scales with atom size, so light atoms (e.g. H-H) are not spuriously
+# bonded the way a fixed additive tolerance would.
+BOND_SCALE = 1.2
 
 
 def _rcov(type_idx):
@@ -51,7 +53,7 @@ def intramol_bonds(coords, type_idxs):
         ci = coords[i]
         for j in range(i + 1, n):
             d = float(np.linalg.norm(ci - coords[j]))
-            if d < ri + _rcov(type_idxs[j]) + BOND_TOL:
+            if d < BOND_SCALE * (ri + _rcov(type_idxs[j])):
                 bonds.add((i, j))
     return bonds
 
