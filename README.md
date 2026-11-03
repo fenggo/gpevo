@@ -398,6 +398,7 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 | `rl_bandit_tutorial.md` | 强化学习模块使用教程（原理 + INPUT.txt 配置 / 单参数消融 / 解读） |
 | `molecule_damage_check.md` | 分子损坏检测的三道检查、1.780 Å 分子间 N–N 键漏检的原因与改进建议 |
 | `strain_matrix.md` | `Parents.strainMatrix` 的来历（晶格应变）、为何零读者、gpevo 不存它的影响面 |
+| `rotation_operator.md` | 旋转算子的两类旋转（刚体 vs 基团扭转）、默认角度（90° / ±90°·±60°·±30°）、`fracRotMut` 默认 0.1、呼吸晶格 10–20% |
 | `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
 
 ## 与 MATLAB 版的关系

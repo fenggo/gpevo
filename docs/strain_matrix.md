@@ -1,7 +1,8 @@
 # `strainMatrix` 是什么 —— 晶格应变与谱系字段
 
 > 姊妹篇：[`rl_bandit_design.md`](rl_bandit_design.md)（算子配额怎么学）、
-> [`molecule_damage_check.md`](molecule_damage_check.md)（结构合法性检查）。
+> [`molecule_damage_check.md`](molecule_damage_check.md)（结构合法性检查）、
+> [`rotation_operator.md`](rotation_operator.md)（旋转算子的默认角度/比例）。
 > 本文回答一个具体问题：MATLAB USPEX 里 `Parents.strainMatrix` 干什么用，
 > gpevo 不存它有没有影响；并记录 `mol.ZMATRIX` 一致性问题的处置结果。
 

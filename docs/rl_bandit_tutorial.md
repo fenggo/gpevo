@@ -63,8 +63,11 @@ contextual bandit —— 正好匹配「少样本 + 高代价」的晶体结构�
 | 5 LatMutate | `mutationRate`（应变 σ） | `[0.05, 0.30]` | 线性 |
 | 6 softmutate | `softStepScale`（步长缩放） | `[0.5, 2.0]`（乘基准） | **指数** `exp` |
 
-> 注意：Rotation 实际施加角是 `±rotationAngleMax / 3`
-> （`gpevo/FunctionFolder/USPEX/310/Rotation_310.py:40`），即设 90° 实际 ±30°。
+> 注意：Rotation 实际施加角不是固定的 `±rotationAngleMax/3`（旧版）。
+> 经 MATLAB 对拍修正后，刚体旋转每轴角度 = `±rotationAngleMax * ref / b[loop]`
+> （`Rotation_310.py:136`），最轻轴可转满 `rotationAngleMax`（默认 90°），重轴
+> 按比例缩小。此外若模板声明了柔性二面角，还会叠加**基团扭转**（±90°/±60°/±30°
+> 渐进随机，见 [`rotation_operator.md`](rotation_operator.md)）。
 
 每个连续参数在内部维护一个在线高斯 `{m, s, neff}`（`RL_agent.py:109` 的 `_fresh`），
 `s` 在代码里不参与更新，方差由有效样本数 `neff` 决定（见 2.4）。
