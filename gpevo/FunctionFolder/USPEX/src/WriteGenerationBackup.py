@@ -24,5 +24,9 @@ def WriteGenerationBackup():
     safesave(os.path.join(current_dir, "ORG_STRUC.pkl"), ORG)
     if G.get("USPEX_STRUC") is not None:
         safesave(os.path.join(current_dir, "USPEX.pkl"), G["USPEX_STRUC"])
+        # Top-level checkpoint so a restart restores the cumulative
+        # record directly; the per-generation USPEX.pkl alone is lossy
+        # across restarts (see Start._restore_uspex_struc).
+        safesave("Current_USPEX.pkl", G["USPEX_STRUC"])
     if G.get("POOL_STRUC") is not None:
         safesave(os.path.join(current_dir, "POOL.pkl"), G["POOL_STRUC"])

@@ -237,7 +237,14 @@ def Start():
         # The cumulative record lives in the per-generation snapshots only, so
         # a restart has to put it back or Individuals loses every generation
         # before the restart the next time it is written.
-        USPEX = _restore_uspex_struc(POP)
+        # Prefer the top-level checkpoint written by WriteGenerationBackup; the
+        # per-generation merge (_restore_uspex_struc) is only a fallback for
+        # runs that predate Current_USPEX.pkl.
+        USPEX = None
+        if os.path.exists("Current_USPEX.pkl"):
+            USPEX = safeload("Current_USPEX.pkl")
+        if USPEX is None or not getattr(USPEX, "POPULATION", None):
+            USPEX = _restore_uspex_struc(POP)
         if USPEX is not None:
             G["USPEX_STRUC"] = USPEX
         # Reprocess already-relaxed individuals from a finished checkpoint so
@@ -291,6 +298,8 @@ def Start():
     from gpevo.runtime import safesave
     safesave("Current_ORG.pkl", G["ORG_STRUC"])
     safesave("Current_POP.pkl", G["POP_STRUC"])
+    if G.get("USPEX_STRUC") is not None:
+        safesave("Current_USPEX.pkl", G["USPEX_STRUC"])
 
     ORG = G["ORG_STRUC"]
     if (ORG.dimension == 3 and ORG.molecule == 1) or \
