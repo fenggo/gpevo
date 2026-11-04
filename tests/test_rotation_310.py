@@ -30,7 +30,8 @@ def test_bond_graph_matches_intramol_bonds():
 def test_twist_no_flex_returns_identical():
     _setup_atom_types()
     coords = np.array([[0, 0, 0], [1.5, 0, 0], [3.0, 0, 0], [4.5, 0, 0]], dtype=float)
-    out = _twist_dihedrals(coords, [], [1, 1, 1, 1], None)
+    out, moved = _twist_dihedrals(coords, [], [1, 1, 1, 1], None)
+    assert moved is False
     assert np.allclose(out, coords)
 
 
@@ -45,8 +46,8 @@ def test_twist_rotates_subtree_keeps_connectivity():
     # Try several seeds; a small-angle twist should be accepted.
     accepted = None
     for _ in range(50):
-        out = _twist_dihedrals(coords, flex, types, ref_bonds, max_iter=5)
-        if not np.allclose(out, coords):
+        out, moved = _twist_dihedrals(coords, flex, types, ref_bonds, max_iter=5)
+        if moved and not np.allclose(out, coords):
             accepted = out
             break
     assert accepted is not None, "expected at least one accepted dihedral twist"

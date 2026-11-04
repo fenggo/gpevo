@@ -123,6 +123,8 @@ def EA_310():
                   # additional to populationSize (like the elitist additions);
                   # 0 unless `fracSwarm` is set in INPUT.txt
                   int(getattr(ORG, "howManySwarm", 0) or 0)]
+        _rot = _im("gpevo.FunctionFolder.USPEX.310.Rotation_310")
+        _rot.reset_group_rotation_counter()
         count = 0
         for i in range(len(operations)):
             for j in range(max(0, int(counts[i]))):
@@ -149,6 +151,13 @@ def EA_310():
         write_log(f"            {int(ORG.howManyPermutations):4d} structures produced by permutation  \n")
         write_log(f"            {int(ORG.howManyMutations):4d} structures produced by latmutation  \n")
         write_log(f"            {int(ORG.howManyRotations):4d} structures produced by rotmutation  \n")
+        gr_gen, gr_total = _rot.group_rotation_counts()
+        nrot = max(0, int(ORG.howManyRotations))
+        gr_pct = 100.0 * gr_gen / nrot if nrot else 0.0
+        gr_line = (f"  group rotation: {gr_gen} / {nrot} rotmutation structures "
+                   f"this generation ({gr_pct:.1f}%), {gr_total} cumulative")
+        console_print(gr_line)
+        write_log(gr_line + "\n")
         write_log(f"            {int(addon_diff):4d} structures kept as best from the previous generation\n")
 
         # No trimming/padding: like EA_310.m, every offspring produced by the
