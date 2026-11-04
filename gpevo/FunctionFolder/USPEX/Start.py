@@ -21,13 +21,30 @@ def calcTypeStr():
     return f"{ORG.dimension}{ORG.molecule}{ORG.varcomp}"
 
 
-def _setup_rng(ORG):
-    # Seed numpy and random modules similar to USPEX's clock-based seeding.
-    now = time.time()
-    seed = int((now * 1000000) % (2**31))
+def _clock_seed():
+    return int((time.time() * 1000000) % (2**31))
+
+
+def _setup_rng(ORG, generation=None):
+    """Seed numpy and random, porting MATLAB's ``fixRandSeed`` behaviour.
+
+    A positive ``ORG.fixRndSeed`` pins the stream: a fresh run uses seed+1
+    (Initialize.m:24-26), a restart uses seed+generation (Start.m:59-61,
+    PickUp.m:29-31).  0 keeps the clock-based seed, which is the MATLAB
+    default and leaves existing runs untouched.  Returns ``(seed, source)``
+    for the run's audit trail.
+    """
+    fixed = int(getattr(ORG, "fixRndSeed", 0) or 0) if ORG is not None else 0
+    if fixed > 0:
+        seed = fixed + (int(generation) if generation is not None else 1)
+        source = f"fixRandSeed={fixed}"
+    else:
+        seed = _clock_seed()
+        source = "clock"
     np.random.seed(seed)
     import random as _random
     _random.seed(seed)
+    return seed, source
 
 
 # Attributes a restart must keep from the checkpoint even though INPUT.txt
@@ -208,8 +225,6 @@ def _restore_uspex_struc(POP):
 
 
 def Start():
-    _setup_rng(None)
-
     # The run directory comes from the current working directory.
     # Bundled resources are resolved from the package itself.
     working = os.getcwd()
@@ -234,6 +249,8 @@ def Start():
         # vector sized for numMols instead of numIons.
         ORG = _refresh_input_options("INPUT.txt")
         G["ORG_STRUC"] = ORG
+        seed, source = _setup_rng(ORG, getattr(POP, "generation", 0))
+        console_print(f"  RNG seed: {seed} (restart, {source})")
         # The cumulative record lives in the per-generation snapshots only, so
         # a restart has to put it back or Individuals loses every generation
         # before the restart the next time it is written.
@@ -277,6 +294,8 @@ def Start():
     else:
         ORG = createORGStruc("INPUT.txt")
         G["ORG_STRUC"] = ORG
+        seed, source = _setup_rng(ORG)
+        console_print(f"  RNG seed: {seed} (fresh, {source})")
         CreateCalcFolder(1)
         Initialize()
         CreateCalcFolder()

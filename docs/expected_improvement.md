@@ -2,10 +2,14 @@
 
 > 本文整理自 gpevo 代码审查对话，说明 `gpevo/FunctionFolder/USPEX/src/gp_ml.py` 中
 > Expected Improvement（期望改进）主动学习的原理、数学形式、代码实现，以及它与
-> 贝叶斯优化的关系。行号以 `gpevo-codebuddy` 当前版本为准。
+> 贝叶斯优化的关系。文中 `Lxxx` 行号是**实施 §2.1/§2.2 之前**的，已陈旧，请按函数名检索。
 >
 > 理论依据与教科书口径的差异（EGO 出处、σ 校准前提、top-K vs q-EI、den 硬门 vs cEI）
-> 见姊妹篇 `ei_theoretical_basis.md`。
+> 见姊妹篇 `ei_theoretical_basis.md`；全仓审查与改进清单见 `docs/algorithm_review.md`。
+>
+> **实施记录（`docs/algorithm_review.md` §0.1）**：EI 现在用真正的后验 σ
+> （`s.sigma_gp = uncertainty/1.96`），`u` 门仍用 1.96σ；`f_best` 在真实选择
+> 与状态报告之间已统一为观测 DFT 最优；每代新增 incumbent/max(μ) 与 `y~μ` 校准诊断。
 
 ---
 
@@ -27,8 +31,11 @@ DFT 预算有限，每代只能算 K 个（`k` 参数）。EI 的作用是**给�
 $N(\mu(x), \sigma^2(x))$。$\mu$ 是"最可能的值"，$\sigma$ 是"我有多没把握"。
 这是 EI 能用数学精确定义的先决条件。
 
-在 gpevo 中，`density_gp` / `energy_gp` 对应 $\mu$，`uncertainty` / `uncertainty_eng`
-对应 $\sigma$（严格说是 $1.96\sigma$）。
+在 gpevo 中，`density_gp` / `energy_gp` 对应 $\mu$。`uncertainty` / `uncertainty_eng`
+是 **$1.96\sigma$（95% 置信半宽）**，`gp_ml.py` 里的 `UNCERT_SCALE=1.96` 与 `_to_sigma()`
+把它换算成后验 σ 存进 `s.sigma_gp` / `s.sigma_eng`，**EI 公式吃的是这个 σ**；
+$1.96\sigma$ 继续用于 OUTPUT.txt 的 UC 列、误差棒和 `u` 门。§2.1 之前曾把 $1.96\sigma$
+直接当 σ 喂给 EI，是本页公式与代码不一致的根源。
 
 ---
 
@@ -134,12 +141,13 @@ sign = -opt_sign if target == "eng_gp" else opt_sign
 1. **定维度 + fallback**（L553-559）：`optType=1` 但拿不到能量预测时，退回密度维度。
 2. **算 f_best**（L567-589）：观测优先，预测兜底。
 3. **den 门**（L599）：本代 GP 预测最高密度 `best_density < den` → 整代跳过。
-4. **逐晶体算 EI**（L604-615）：`residual > 10` 的跳过（外推区 μ/σ 不可信），
+4. **逐晶体算 EI**（L604-615）：`residual > RESIDUAL_CUT`（=5.0，标准化空间）的跳过（外推区 μ/σ 不可信），
    其余 `ei = EI(sign*mu, sigma, f_best)`。
 5. **排序选 top-K**（L619-638）：`mode=ei` 按 EI 降序、`uncertainty` 按 σ 降序、
    `random` 打乱。
-6. **两道后置门**（L639-648）：`σ > u`（太确定的不花 DFT）、
-   `density_gp ≥ den`（不够密的不算）。
+6. **两道后置门**（L639-648）：`1.96σ > u`（`u` 是 95% 半宽的下界，太确定的不花 DFT）、
+   `density_gp ≥ den`（不够密的不算）。EI 本身用 σ，但 `u` 门刻意保留 1.96σ 标度，
+   以免把既有 INPUT.txt 的 `u` 值等效收紧 1.96 倍。
 
 ---
 
@@ -184,7 +192,7 @@ sign = -opt_sign if target == "eng_gp" else opt_sign
 |---|---|---|---|
 | `k` | `2 : k` | 每代 EI top-K 个数 | — |
 | `mode` | `ei : mode` | `ei` \| `uncertainty` \| `random` | — |
-| `u` | `0.04 : u` | 不确定度门（σ 下界，超过才送 DFT） | **跟随 EI 目标维度**：能量维是 eV 量级（data22 实测 σ 中位数 ~0.59 eV），密度维是 g/cm³ 量级（~0.04） |
+| `u` | `0.04 : u` | 不确定度门（**1.96σ 下界**，超过才送 DFT） | **跟随 EI 目标维度**：能量维是 eV 量级（data22 实测 σ 中位数 ~0.59 eV），密度维是 g/cm³ 量级（~0.04）。注意这是 95% 半宽的标度，不是 EI 里的 σ；换算关系是 `σ > u/1.96` |
 | `den` | `1.8 : den` | 密度门（`density_gp ≥ den` 才送 DFT） | 永远盯预测密度，与 optType 无关 |
 | `optType` | `1 : optType` | 1=焓最小化（能量 EI），11=密度最大化（密度 EI） | `-N` 写法=对应最大化/最小化翻转，经 `opt_sign` 进入 `sign` |
 

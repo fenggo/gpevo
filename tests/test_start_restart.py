@@ -12,7 +12,9 @@ a stopped run leaves behind.
 from __future__ import annotations
 
 import os
+import random
 
+import numpy as np
 import pytest
 
 from gpevo.runtime import G, struct
@@ -217,3 +219,50 @@ def test_no_input_txt_leaves_the_checkpoint_alone(tmp_path):
 
     assert org.gpDen == pytest.approx(1.8)
     assert org.latVolume == before.latVolume
+
+
+# ---- fixRandSeed (MATLAB Start.m / Initialize.m / PickUp.m) -------------
+
+def test_restart_picks_up_fix_rand_seed(tmp_path):
+    """A seed edited into INPUT.txt while stopped must reach the ORG."""
+    path = _input_file(tmp_path)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("  12345 : fixRandSeed\n")
+
+    org = _refresh_input_options(path)
+
+    assert org.fixRndSeed == 12345
+
+
+def test_fixed_seed_reproduces_both_rng_streams():
+    """Same seed -> identical numpy AND random draws (paired comparisons)."""
+    from gpevo.FunctionFolder.USPEX.Start import _setup_rng
+
+    org = struct(fixRndSeed=12345)
+    seed1, source1 = _setup_rng(org)
+    a_np, a_py = np.random.rand(5), random.random()
+    seed2, source2 = _setup_rng(org)
+    b_np, b_py = np.random.rand(5), random.random()
+
+    assert (seed1, source1) == (seed2, source2) == (12346, "fixRandSeed=12345")
+    assert np.array_equal(a_np, b_np)
+    assert a_py == b_py
+
+
+def test_restart_seed_is_offset_by_the_generation():
+    from gpevo.FunctionFolder.USPEX.Start import _setup_rng
+
+    seed, source = _setup_rng(struct(fixRndSeed=12345), generation=9)
+
+    assert seed == 12345 + 9
+    assert source == "fixRandSeed=12345"
+
+
+def test_zero_keeps_the_clock_seed():
+    """Default behaviour (no fixRandSeed) is unchanged."""
+    from gpevo.FunctionFolder.USPEX.Start import _setup_rng
+
+    seed, source = _setup_rng(struct(fixRndSeed=0))
+
+    assert source == "clock"
+    assert 0 <= seed < 2**31

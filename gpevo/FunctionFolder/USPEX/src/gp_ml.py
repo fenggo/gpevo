@@ -32,10 +32,18 @@ import shutil
 import numpy as np
 
 from gpevo.log_utils import console_only, console_print
+from gpevo.runtime import RESIDUAL_CUT
 
 # Active-learning defaults of CalcFitness_310.m:124-129, used when the ORG has
 # no INPUT.txt value (older pickles).
 _EI_DEFAULTS = {"u": 0.04, "k": 1, "mode": "ei"}
+
+# uspexkit reports the 95% confidence HALF-width 1.96*std in the
+# ``uncertainty`` / ``uncertainty_eng`` fields (core.py:342,374).  EI's closed
+# form needs the posterior standard deviation sigma, so the Python layer keeps
+# both: ``s.uq`` stays 1.96*sigma for OUTPUT.txt / error bars / the ``u`` gate,
+# ``s.sigma_gp`` is what the acquisition actually consumes.
+UNCERT_SCALE = 1.96
 
 _PKL_NAMES = ("gpr_density.pkl", "gpr_energy.pkl", "rfr.pkl")
 
@@ -264,9 +272,11 @@ def apply_gp_metrics(s, result):
     s.distance = _finite(result.get("residual"))
     s.density_gp = _finite(result.get("density_gp"))
     s.uq = _finite(result.get("uncertainty"))
+    s.sigma_gp = _to_sigma(result.get("uncertainty"))
     # Energy prediction and its uncertainty, for the OUTPUT.txt table.
     s.energy_gp = _finite(result.get("energy_pred"))
     s.uq_eng = _finite(result.get("uncertainty_eng"))
+    s.sigma_eng = _to_sigma(result.get("uncertainty_eng"))
     s.gp = dict(result)
     feature = result.get("feature")
     if isinstance(feature, (list, tuple)) and len(feature) == _FEATURE_LEN:
@@ -333,8 +343,10 @@ def apply_pred_metrics(s, entry):
         s.distance = residual
     s.density_gp = _finite(entry.get("density_gp"))
     s.uq = _finite(entry.get("uncertainty"))
+    s.sigma_gp = _to_sigma(entry.get("uncertainty"))
     s.energy_gp = _finite(entry.get("energy_pred"))
     s.uq_eng = _finite(entry.get("uncertainty_eng"))
+    s.sigma_eng = _to_sigma(entry.get("uncertainty_eng"))
     s.gp_pred = dict(entry)
     return True
 
@@ -342,19 +354,32 @@ def apply_pred_metrics(s, entry):
 # Row layout shared by ``_metrics_row`` and ``_read_gp_csv`` (the gp.csv
 # columns of uspexkit core.py:223-224 with the leading id stripped):
 #   0 nearest, 1 residual, 2 density_min, 3 density_rf, 4 density_gp,
-#   5 uncertainty, 6 energy_min, 7 energy_pred, 8 uncertainty_eng
+#   5 sigma (posterior std), 6 energy_min, 7 energy_pred, 8 sigma_energy
+# Both readers convert the 1.96*std columns of gp.csv / gp() into sigma.
 _DEN_GP, _UNCERT = 4, 5
 _ENG_GP, _UNCERT_ENG = 7, 8
 _ROW_LEN = 9
 
 
+def _to_sigma(uncertainty):
+    """Convert uspexkit's 1.96*std half-width into a posterior std."""
+    uq = _finite(uncertainty)
+    return uq / UNCERT_SCALE if math.isfinite(uq) else float("nan")
+
+
 def _metrics_row(s):
-    """Row layout of ``_read_gp_csv``, built from stored per-structure values."""
+    """Row layout of ``_read_gp_csv``, columns 5/8 are posterior sigma."""
+    sigma = _finite(getattr(s, "sigma_gp", None))
+    if not math.isfinite(sigma):
+        sigma = _to_sigma(getattr(s, "uq", None))
+    sigma_eng = _finite(getattr(s, "sigma_eng", None))
+    if not math.isfinite(sigma_eng):
+        sigma_eng = _to_sigma(getattr(s, "uq_eng", None))
     return [float("nan"), _finite(getattr(s, "distance", None)), float("nan"),
             float("nan"), _finite(getattr(s, "density_gp", None)),
-            _finite(getattr(s, "uq", None)), float("nan"),
+            sigma, float("nan"),
             _finite(getattr(s, "energy_gp", None)),
-            _finite(getattr(s, "uq_eng", None))]
+            sigma_eng]
 
 
 def metrics_table(POP, valid, numbers, gp_file):
@@ -385,6 +410,8 @@ def parse_gp_params(ORG):
         "ncpu": _ncpu(ORG),
         "dat": str(_opt(ORG, "gpData", "data")),
         "den": float(_opt(ORG, "gpDen", 0.0)),
+        # ``u`` is a floor on the REPORTED 1.96*std uncertainty (gp.csv
+        # column 6/10), not on the posterior std the EI formula uses.
         "u": float(_opt(ORG, "gpU", _EI_DEFAULTS["u"])),
         "k": int(_opt(ORG, "gpK", _EI_DEFAULTS["k"])),
         "mode": str(_opt(ORG, "gpMode", _EI_DEFAULTS["mode"])),
@@ -423,7 +450,8 @@ def _read_gp_csv(path):
     5 density_gp, 6 uncertainty, 7 energy_min, 8 energy_pred, 9 uncertainty_eng
 
     The id is stripped, so the stored row starts at the nearest index (see
-    ``_ROW_LEN``).  Short or unreadable cells become NaN: an old gp.csv whose
+    ``_ROW_LEN``).  Columns 5/8 are converted from the stored 1.96*std to the
+    posterior std.  Short or unreadable cells become NaN: an old gp.csv whose
     two last columns are still empty must not cost the whole row.
     """
     table = {}
@@ -440,6 +468,11 @@ def _read_gp_csv(path):
                     continue
                 values = [_finite(value) for value in row[1:_ROW_LEN + 1]]
                 values += [float("nan")] * (_ROW_LEN - len(values))
+                # gp.csv stores 1.96*std in columns 6/10 (see header above);
+                # the table's sigma columns must hold the posterior std.
+                for col in (_UNCERT, _UNCERT_ENG):
+                    if math.isfinite(values[col]):
+                        values[col] /= UNCERT_SCALE
                 table.setdefault(key, values)
     except OSError:
         return {}
@@ -514,30 +547,22 @@ def _usable(numbers, table, mu_col, sigma_col):
     """True when at least one valid crystal carries both predictions."""
     for number in numbers:
         row = table.get(number)
-        if row is None or row[1] > 10:
+        if row is None or row[1] > RESIDUAL_CUT:
             continue
         if math.isfinite(row[mu_col]) and math.isfinite(row[sigma_col]):
             return True
     return False
 
 
-def _observed_incumbent(data_dir, target, sign):
-    """Best observed (DFT) value from ``<data_dir>/feature.csv``, in EI space.
+def _best_observed(data_dir, column, sign):
+    """Best observed physical value of one ``feature.csv`` column.
 
-    ``feature.csv`` holds the labelled ground truth the GP was trained on:
-    ``etot`` (total energy) and ``density`` are the DFT-computed labels
-    (uspexkit/core.py appends ``energy`` / ``density_`` there).  The chief
-    defect of the previous EI was that ``f_best`` came from the GP's own
-    prediction; a wrong incumbent shifts every Z score and biases the pick
-    toward exploitation.  The honest incumbent is the observed value.
-
-    Returns the incumbent in the *EI target space* (``sign * value``), or
-    ``None`` when the file is missing, empty or lacks the needed column, in
-    which case the caller falls back to the predicted value.
+    ``sign < 0`` means the objective minimises that column (energy), so the
+    best is the minimum; otherwise it is the maximum (density).  Returns the
+    raw physical value, not the sign-flipped EI-space one.
     """
     if not data_dir:
         return None
-    column = "etot" if target == "eng_gp" else "density"
     path = os.path.join(data_dir, "feature.csv")
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fp:
@@ -563,8 +588,37 @@ def _observed_incumbent(data_dir, target, sign):
     if not values:
         return None
     arr = np.asarray(values, dtype=float)
-    best = float(np.min(arr)) if sign < 0 else float(np.max(arr))
-    return sign * best
+    return float(np.min(arr)) if sign < 0 else float(np.max(arr))
+
+
+def _observed_incumbent(data_dir, target, sign):
+    """Best observed (DFT) value from ``<data_dir>/feature.csv``, in EI space.
+
+    ``feature.csv`` holds the labelled ground truth the GP was trained on:
+    ``etot`` (total energy) and ``density`` are the DFT-computed labels
+    (uspexkit/core.py appends ``energy`` / ``density_`` there).  The chief
+    defect of the previous EI was that ``f_best`` came from the GP's own
+    prediction; a wrong incumbent shifts every Z score and biases the pick
+    toward exploitation.  The honest incumbent is the observed value.
+
+    Returns the incumbent in the *EI target space* (``sign * value``), or
+    ``None`` when the file is missing, empty or lacks the needed column, in
+    which case the caller falls back to the predicted value.
+    """
+    column = "etot" if target == "eng_gp" else "density"
+    best = _best_observed(data_dir, column, sign)
+    return None if best is None else sign * best
+
+
+def observed_density_incumbent(ORG):
+    """Raw max observed DFT density for the status report's EI preview.
+
+    ``_ei_preview`` ranks on GP-predicted density, so it must use the same
+    incumbent as ``_select_by_ei``; otherwise the report shows an EI top-1 the
+    real selection never considered (ct22/results2: 1.8032 vs 1.8991).
+    """
+    _, _, data_dir = gp_data_paths(ORG)
+    return _best_observed(data_dir, "density", 1)
 
 
 def _select_by_ei(numbers, table, params, data_dir=None):
@@ -598,27 +652,39 @@ def _select_by_ei(numbers, table, params, data_dir=None):
     # promise about this generation's predicted density, not the past.
     f_best = -float("inf") if observed is None else observed
     best_density = -float("inf")
+    max_mu_ei = -float("inf")           # best candidate mean, in EI space
     filtered = 0
     for number in numbers:
         row = table.get(number)
         if row is None:
             continue
-        if row[1] > 10:                     # residual
+        if row[1] > RESIDUAL_CUT:                     # residual
             filtered += 1
             continue
         if math.isfinite(row[_DEN_GP]):
             best_density = max(best_density, row[_DEN_GP])
+        mu, sigma = row[mu_col], row[sigma_col]
+        if not (math.isfinite(mu) and math.isfinite(sigma)):
+            continue
+        max_mu_ei = max(max_mu_ei, sign * mu)
         if observed is None:                 # predicted fallback only here
-            mu, sigma = row[mu_col], row[sigma_col]
-            if not (math.isfinite(mu) and math.isfinite(sigma)):
-                continue
             f_best = max(f_best, sign * mu)
     if filtered > 0:
-        console_print(f"  Filtered out {filtered} crystals with residual > 10")
+        console_print(f"  Filtered out {filtered} crystals with residual > "
+                      f"{RESIDUAL_CUT:g}")
     if observed is not None:
         # ``sign * observed`` is the physical value again (sign in {-1, 1}):
         # the lowest energy for optType 1, the highest density for optType 11.
-        console_print(f"  EI incumbent: observed {target} = {sign * observed:.4f}")
+        console_print(
+            f"  EI incumbent: observed {target} = {sign * observed:.4f}"
+            f"  (max predicted this generation = {max_mu_ei:.4f},"
+            f" gap = {observed - max_mu_ei:+.4f})")
+        if math.isfinite(max_mu_ei) and observed > max_mu_ei:
+            # The observed incumbent lies outside the range the GP can predict
+            # for these candidates, so every (mu - f_best) is negative and EI
+            # collapses to its exploration term.  This is the ct22 symptom.
+            console_print("  EI note: incumbent above every candidate mean;"
+                          " the improvement term vanishes, EI ~ exploration")
 
     # `den` is a density, so it gates on the predicted density whatever the
     # acquisition target is; -inf means no crystal carries one at all.
@@ -631,7 +697,7 @@ def _select_by_ei(numbers, table, params, data_dir=None):
     ei_list, crystal_list, uncert_list, mu_list = [], [], [], []
     for number in numbers:
         row = table.get(number)
-        if row is None or row[1] > 10:
+        if row is None or row[1] > RESIDUAL_CUT:
             continue
         mu, sigma = row[mu_col], row[sigma_col]
         if not (math.isfinite(mu) and math.isfinite(sigma)):
@@ -664,7 +730,10 @@ def _select_by_ei(numbers, table, params, data_dir=None):
 
     candidates = [(crystal_list[i], uncert_list[i], mu_list[i], ei_list[i])
                   for i in order[:n_sel]]
-    above_u = [s for s in candidates if s[1] > params["u"]]
+    # ``u`` is calibrated on the reported 95% half-width, so compare the
+    # reconstructed 1.96*sigma against it (EI itself used sigma above).
+    above_u = [s for s in candidates
+               if s[1] * UNCERT_SCALE > params["u"]]
     if not above_u:
         return [], mode_label, (f"no crystal above the uncertainty threshold "
                                 f"({params['u']:.4f}) among the top-{n_sel}"), target
@@ -782,6 +851,52 @@ def _log_learning_curve(ORG, POP, data_dir, rows_before):
         pass                            # a log line must never break a run
 
 
+# Pre-DFT GP means paired with the DFT densities they bought, keyed by the
+# global crystal id.  Kept in memory for the whole process (EA_310 loops here);
+# a restart starts a fresh accumulator, which is fine for a diagnostic.
+_CALIBRATION = {}
+_CALIBRATION_DIR = None
+
+
+def _record_gp_calibration(res_folder, ids, pre_mu):
+    """One-line GP-vs-DFT calibration for the crystals just labelled.
+
+    ``density.log`` (written by uspexkit.calc) holds ``id density energy`` of
+    the DFT labels; ``pre_mu`` holds the GP mean EI ranked *before* the label
+    existed.  Using the pre-label mean keeps this honest: the post-label
+    re-prediction in density_predict.log is in-sample and would flatter the GP.
+    """
+    global _CALIBRATION_DIR
+    if _CALIBRATION_DIR != res_folder:
+        _CALIBRATION.clear()
+        _CALIBRATION_DIR = res_folder
+    try:
+        with open(os.path.join(res_folder, "density.log"), "r",
+                  encoding="utf-8", errors="replace") as fp:
+            for line in fp:
+                parts = line.split()
+                if len(parts) < 2 or parts[0].startswith("#"):
+                    continue
+                try:
+                    cid, density = int(float(parts[0])), float(parts[1])
+                except ValueError:
+                    continue
+                if (cid in ids and cid in pre_mu and cid not in _CALIBRATION
+                        and math.isfinite(density) and math.isfinite(pre_mu[cid])):
+                    _CALIBRATION[cid] = (pre_mu[cid], density)
+    except OSError:
+        return
+    if len(_CALIBRATION) < 3:
+        return
+    mu = np.asarray([p[0] for p in _CALIBRATION.values()], dtype=float)
+    y = np.asarray([p[1] for p in _CALIBRATION.values()], dtype=float)
+    slope, intercept = np.polyfit(mu, y, 1)
+    console_print(
+        f"  GP calibration (n={len(mu)} labelled): y = {slope:.3f}*mu "
+        f"+ {intercept:.3f}; mean(mu-y) = {float(np.mean(mu - y)):+.4f}, "
+        f"RMSE = {float(np.sqrt(np.mean((mu - y) ** 2))):.4f} g/cm^3")
+
+
 def gp_active_learning(ORG, POP, fitness):
     """Label a few structures of this generation, then re-predict them.
 
@@ -890,10 +1005,14 @@ def _gp_active_learning(ORG, POP, fitness):
                       f"({params['u']:.4f})")
         for rank, (number, sigma, mu, ei) in enumerate(selected, start=1):
             console_print(f"  {rank}: crystal {number}  EI={ei:.6f}  {target}={mu:.4f}"
-                          f"  sigma={sigma:.4f}")
+                          f"  sigma={sigma:.4f} (95%={sigma * UNCERT_SCALE:.4f})")
     _write_ei_log(ORG, POP.generation, [s[0] for s in selected])
 
     ids_list = [int(s[0]) for s in selected]
+    # GP means BEFORE the DFT labels exist: the honest input to the calibration
+    # diagnostic below (pred() re-predicts with the enlarged database later).
+    pre_mu = {n: table[n][_DEN_GP] for n in ids_list
+              if n in table and math.isfinite(table[n][_DEN_GP])}
     stale_dirs = _prune_stale_id_dirs(res_folder, ids_list)
     if stale_dirs:
         console_print("  Removed {} result folder(s) of a previous aborted "
@@ -928,6 +1047,7 @@ def _gp_active_learning(ORG, POP, fitness):
 
     # Step: retrain on the enlarged database -- the pickles have to go from
     # every directory uspexkit may have cached them in.
+    _record_gp_calibration(res_folder, set(ids_list), pre_mu)
     dropped = _invalidate_pkl(home, res_folder, data_dir)
     console_print(f"  GP training set: {rows_before} -> {rows_after} rows; "
                   f"dropped {len(dropped)} cached model(s)")
@@ -977,7 +1097,7 @@ def _gp_active_learning(ORG, POP, fitness):
     skipped = 0
     for index, number in zip(valid, numbers):
         row = table.get(number)
-        if row is not None and row[1] > 10:
+        if row is not None and row[1] > RESIDUAL_CUT:
             skipped += 1
             continue
         if opt_type == 1:
@@ -1002,5 +1122,5 @@ def _gp_active_learning(ORG, POP, fitness):
             continue
         updated += 1
     console_print(f"  Updated fitness for {updated}/{len(valid)} valid crystals "
-                  f"(skipped {skipped} with residual > 10)")
+                  f"(skipped {skipped} with residual > {RESIDUAL_CUT:g})")
     return fitness

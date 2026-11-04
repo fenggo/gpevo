@@ -15,7 +15,7 @@ USPEX 310 共晶 (TNT₄·CL20₄) 全代密度分析 —— 纯绘图 + 报告.
 GP / EI 语义 (与 CalcFitness_310.m 一致):
   density_gp  = density_predict.log 第5列
   σ           = 1.96 × std_den  (gp.csv col7 = 1.96 * std_den)
-  f_best      = max(density_gp) 于 residual≤10 的本代有效晶体
+  f_best      = max(density_gp) 于 residual ≤ RESIDUAL_CUT (5.0) 的本代有效晶体
   EI          = (μ-f_best)·Φ(Z) + σ·φ(Z),  Z=(μ-f_best)/σ
   每代取 EI 前 k 个 (INPUT.txt --k=2)
 
@@ -35,8 +35,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from gpevo.runtime import RESIDUAL_CUT
+
 UNCERT_SCALE = 1.96          # gp.csv uncertainty = 1.96 * pred std_den
-RESIDUAL_CUT = 10.0          # CalcFitness_310.m 的 residual>10 过滤
 
 
 # -----------------------------------------------------------------------------

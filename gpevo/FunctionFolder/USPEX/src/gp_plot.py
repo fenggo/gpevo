@@ -14,7 +14,7 @@ Four panels, all driven by the same in-memory records:
   B  exploration map (prediction vs uncertainty) with the ``u`` / ``den``
      INPUT thresholds drawn, i.e. a picture of the active-learning setup;
   C  GP prediction vs the density actually used for the fitness (identity
-     line, ±1.96σ bars; off-diagonal points are the residual>10 fallback,
+     line, ±1.96σ bars; off-diagonal points are the OOD fallback,
      diamonds are DFT-verified);
   D  extrapolation check (prediction vs residual) with the 10 Å²-ish cutoff
      the MATLAB code uses to distrust the GP mean.
@@ -27,12 +27,11 @@ import os
 import numpy as np
 
 from gpevo.log_utils import console_print, write_log
+from gpevo.runtime import RESIDUAL_CUT
 from gpevo.FunctionFolder.USPEX.src.gp_ml import (
-    _expected_improvement, parse_gp_params,
+    _expected_improvement, observed_density_incumbent, parse_gp_params,
+    UNCERT_SCALE,
 )
-
-RESIDUAL_CUT = 10.0        # gp_active_learning / CalcFitness_310.m filter
-UNCERT_SCALE = 1.96        # s.gp['uncertainty'] already is 1.96 * std
 
 # muted, print-friendly palette (close to the denevo one)
 C_POP = "#4C72B0"          # population
@@ -75,7 +74,10 @@ def collect_records(POP):
             "number": int(getattr(s, "Number", 0)),
             "origin": str(getattr(s, "howCome", "") or ""),
             "dgp": dgp,
+            # ``sigma`` stays the reported 95% half-width for the error bars
+            # and the ``u`` gate; EI's closed form needs the posterior std.
             "sigma": _f("uncertainty"),
+            "sd": _f("uncertainty") / UNCERT_SCALE,
             "residual": _f("residual"),
             "dft": bool(gp.get("dft", False)),
             "density_used": _f("density"),
@@ -85,20 +87,25 @@ def collect_records(POP):
     return records
 
 
-def _ei_preview(records, params):
+def _ei_preview(records, params, incumbent=None):
     """What the active learning would select on this population.
 
-    Same rules as gp_active_learning (gp_ml.py): f_best = max density_gp over
-    the crystals with residual <= RESIDUAL_CUT, EI per crystal, top-k, then
-    keep only sigma > u and dgp >= den.
+    Same rules as gp_active_learning (gp_ml.py): EI per crystal (on the
+    posterior std ``sd``), top-k, then keep only 1.96*sd > u and dgp >= den.
+    ``u`` is a floor on the reported 95% half-width, matching
+    gp_ml._select_by_ei.  ``incumbent`` is the observed DFT best density the
+    real selection uses; without it the report falls back to max(dgp), which
+    is a *different* f_best and made ct22/results2 show an EI top-1 the run
+    never considered.
     """
     valid = [r for r in records if r["residual"] <= RESIDUAL_CUT]
     if not valid:
         return [], float("-inf"), []
-    f_best = max(r["dgp"] for r in valid)
+    f_best = (incumbent if incumbent is not None and math.isfinite(incumbent)
+              else max(r["dgp"] for r in valid))
     scored = []
     for r in valid:
-        ei = _expected_improvement(r["dgp"], r["sigma"], f_best)
+        ei = _expected_improvement(r["dgp"], r["sd"], f_best)
         scored.append((ei, r))
     scored.sort(key=lambda t: -t[0])
     top = [(ei, r) for ei, r in scored[:max(1, int(params["k"]))]]
@@ -146,7 +153,12 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
         return None
 
     params = parse_gp_params(ORG)
-    selected, f_best, top_density = _ei_preview(records, params)
+    # The status report must rank EI against the same incumbent as the real
+    # selection; only the density objective shares that physical quantity.
+    incumbent = None
+    if int(params.get("optType", 11) or 11) != 1:
+        incumbent = observed_density_incumbent(ORG)
+    selected, f_best, top_density = _ei_preview(records, params, incumbent)
     sel_numbers = {r["number"] for _, r in selected}
     top_numbers = {r["number"] for r in top_density}
     inside = [r for r in records if r["residual"] <= RESIDUAL_CUT]
@@ -179,9 +191,11 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
     if vals_out:
         ax_a.hist(vals_out, bins=bins, color=C_POP_OUT, alpha=0.9,
                   label=f"extrapolated ({len(vals_out)})")
-    if math.isfinite(f_best):
-        ax_a.axvline(f_best, color="black", lw=1.0, ls=":",
-                     label=f"f_best = {f_best:.4f}")
+    # Anchor the histogram to the population's own best prediction; the
+    # observed incumbent can lie well outside the plotted density range.
+    if top_density:
+        ax_a.axvline(top_density[0]["dgp"], color="black", lw=1.0, ls=":",
+                     label=f"max GP density = {top_density[0]['dgp']:.4f}")
     # rug strip under the histogram: every structure as a tick, coloured by
     # the role it plays (clearer than stacking vertical lines on the bars)
     strip_y = -0.06 * ax_a.get_ylim()[1]
@@ -297,7 +311,8 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-    _report(records, selected, f_best, top_density, inside, outside, params)
+    _report(records, selected, f_best, top_density, inside, outside, params,
+            incumbent)
     console_print(f"  GP plot: {out_path}")
     try:
         write_log(f"GP status plot (generation {generation}): {out_path}\n")
@@ -306,21 +321,26 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
     return out_path
 
 
-def _report(records, selected, f_best, top_density, inside, outside, params):
+def _report(records, selected, f_best, top_density, inside, outside, params,
+            incumbent=None):
     """Terminal summary — the numbers behind the figure."""
     console_print(f"  --- GP status: {len(records)} structures, "
                   f"{len(inside)} inside / {len(outside)} extrapolated ---")
     if math.isfinite(f_best):
-        best = max(inside, key=lambda r: r["dgp"])
-        console_print(f"  f_best (GP density) = {f_best:.4f} "
-                      f"[#{best['number']}]")
+        source = ("observed DFT" if incumbent is not None
+                  and math.isfinite(incumbent) else "GP density fallback")
+        console_print(f"  f_best (EI incumbent, {source}) = {f_best:.4f}")
     if top_density:
+        best = top_density[0]
+        console_print(f"  max GP density = {best['dgp']:.4f} "
+                      f"[#{best['number']}]")
         console_print("  top-5 by GP density: " + ", ".join(
             f"#{r['number']}({r['dgp']:.4f})" for r in top_density))
     if selected:
         console_print(f"  EI top-{int(params['k'])} "
                       f"(u={params['u']:g}, den={params['den']:g}): " + ", ".join(
-                          f"#{r['number']}(EI={ei:.5f}, σ={r['sigma']:.4f})"
+                          f"#{r['number']}(EI={ei:.5f}, σ={r['sd']:.4f}, "
+                          f"95%={r['sigma']:.4f})"
                           for ei, r in selected))
     else:
         console_print(f"  EI: no crystal above u={params['u']:g} "

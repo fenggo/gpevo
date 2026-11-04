@@ -147,3 +147,44 @@ def test_pred_reads_the_database_once_per_call(run, monkeypatch):
     # never (it was read per crystal before, and never used).
     assert calls["loadtxt"] == 2
     assert calls["trajectory"] == 1          # Individuals.traj, the query set
+
+# ────────────────────────────────────────────────────────────────────
+#  §2.3 standardised residual
+# ────────────────────────────────────────────────────────────────────
+
+def test_standardized_residual_is_invariant_to_column_units():
+    """A raw distance is dominated by the largest-unit column (the §2.3 bug)."""
+    from sklearn.preprocessing import StandardScaler
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 10))
+    feature = X[0] + 0.1
+    sc = StandardScaler().fit(X)
+    res, imin, Xq = core.standardized_residual(feature, sc.transform(X), sc)
+    assert Xq.shape == (1, 10)
+    assert imin == 0
+
+    # Scale one column by 1e6: a RAW squared distance would change by 1e12,
+    # the standardised one must be unchanged.
+    X2 = X.copy()
+    X2[:, 0] *= 1e6
+    f2 = feature.copy()
+    f2[0] *= 1e6
+    sc2 = StandardScaler().fit(X2)
+    res2, imin2, _ = core.standardized_residual(f2, sc2.transform(X2), sc2)
+    assert imin2 == 0
+    assert np.allclose(res2, res)
+
+
+def test_standardized_residual_is_a_squared_distance():
+    from sklearn.preprocessing import StandardScaler
+
+    X = np.array([[0.0, 0.0], [2.0, 0.0], [0.0, 4.0]])
+    sc = StandardScaler().fit(X)
+    Z = sc.transform(X)
+    res, imin, _ = core.standardized_residual(np.array([0.0, 0.0]), Z, sc)
+    assert imin == 0
+    assert res[0] == pytest.approx(0.0)
+    assert res[1] > 0 and res[2] > 0
+    assert np.all(res >= 0)
+

@@ -11,6 +11,15 @@ import random as _random
 from collections import defaultdict
 
 
+# Cutoff on the GP residual: squared distance to the nearest labelled structure
+# measured in the STANDARDISED 10-D ReaxFF feature space (the same space the GP
+# is fitted in).  Single source of truth for uspexkit.core, gp_ml, gp_plot and
+# the ei_report / ei_select tools.  Calibrated on the p99 of within-database
+# nearest-neighbour distances: ~5.0 (example/data22) / ~3.2 (dnmt/data).
+# See docs/algorithm_review.md §2.3.
+RESIDUAL_CUT = 5.0
+
+
 # ---------------------------------------------------------------------------
 # Struct helpers
 # ---------------------------------------------------------------------------

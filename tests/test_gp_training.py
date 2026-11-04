@@ -79,11 +79,16 @@ def run(tmp_path):
 
 def _individual(number, residual=1.0, density_gp=None, sigma=0.05,
                 energy_gp=-100.0, sigma_eng=0.1):
-    """A structure ready for the learning loop; no GP prediction by default."""
+    """A structure ready for the learning loop; no GP prediction by default.
+
+    ``sigma`` is the posterior std EI consumes; ``uq`` is the reported 95%
+    half-width that OUTPUT.txt and the ``u`` gate use.
+    """
     return struct(Number=number, Enthalpies=np.array([-100.0]),
                   numMols=[2], numIons=[2], distance=residual,
-                  density_gp=density_gp, uq=sigma, energy_gp=energy_gp,
-                  uq_eng=sigma_eng)
+                  density_gp=density_gp, sigma_gp=sigma,
+                  uq=sigma * gp_ml.UNCERT_SCALE, energy_gp=energy_gp,
+                  sigma_eng=sigma_eng, uq_eng=sigma_eng * gp_ml.UNCERT_SCALE)
 
 
 def _org(home, res_folder, *, u=0.04, k=2, mode="ei", nboot=2, den=1.8,
@@ -684,3 +689,181 @@ def test_nboot_defaults_to_two(tmp_path):
     createORG_AbinitCode(str(input_file))
 
     assert G["ORG_STRUC"].gpNboot == 2
+
+# ────────────────────────────────────────────────────────────────────
+#  sigma semantics: EI uses posterior sigma, the u gate uses 1.96*sigma
+# ────────────────────────────────────────────────────────────────────
+
+def test_gp_metrics_keep_both_sigma_and_95pct_width():
+    s = struct()
+    gp_ml.apply_gp_metrics(s, {"residual": 1.0, "density_gp": 1.8,
+                               "uncertainty": 0.098, "energy_pred": -10.0,
+                               "uncertainty_eng": 0.196})
+    assert s.uq == pytest.approx(0.098)                    # OUTPUT.txt / u gate
+    assert s.sigma_gp == pytest.approx(0.098 / 1.96)      # EI
+    assert s.uq_eng == pytest.approx(0.196)
+    assert s.sigma_eng == pytest.approx(0.196 / 1.96)
+
+
+def test_pred_metrics_convert_the_uncertainty_too():
+    s = struct()
+    gp_ml.apply_pred_metrics(s, {"residual": 1.0, "density_gp": 1.9,
+                                 "uncertainty": 0.049, "energy_pred": -11.0,
+                                 "uncertainty_eng": 0.098})
+    assert s.sigma_gp == pytest.approx(0.025)
+    assert s.sigma_eng == pytest.approx(0.05)
+
+
+def test_metrics_row_prefers_the_posterior_sigma_and_falls_back():
+    s = _individual(1, density_gp=1.9, sigma=0.03)
+    assert gp_ml._metrics_row(s)[gp_ml._UNCERT] == pytest.approx(0.03)
+    assert gp_ml._metrics_row(s)[gp_ml._UNCERT_ENG] == pytest.approx(0.1)
+    # an older checkpoint without sigma_gp must still yield sigma
+    del s.sigma_gp
+    assert gp_ml._metrics_row(s)[gp_ml._UNCERT] == pytest.approx(0.03)
+
+
+def test_read_gp_csv_converts_the_95pct_columns(tmp_path):
+    path = tmp_path / "gp.csv"
+    path.write_text(
+        "index, nearest, residual, density_min, density_rf, density_gp, "
+        "uncertainty, energy_min, energy_pred, uncertainty_eng\n"
+        "11, 0, 1.0, 1.7, 1.75, 1.80, 0.098, -10.0, -10.1, 0.196\n",
+        encoding="utf-8")
+    table = gp_ml._read_gp_csv(str(path))
+    assert table[11][gp_ml._UNCERT] == pytest.approx(0.05)
+    assert table[11][gp_ml._UNCERT_ENG] == pytest.approx(0.10)
+
+
+def _ei_table(sigma):
+    nan = float("nan")
+    return {11: [nan, 1.0, nan, nan, 1.90, sigma, nan, -10.0, sigma]}
+
+
+def test_ei_uses_posterior_sigma_but_u_gate_uses_the_95pct_width():
+    params = gp_ml.parse_gp_params(_org(".", ".", u=0.04, k=1, den=1.8))
+    selected, _label, reason, _target = gp_ml._select_by_ei(
+        [11], _ei_table(0.03), params)
+    assert reason is None
+    assert selected[0][1] == pytest.approx(0.03)           # posterior sigma
+    # 1.96*0.019 = 0.0372 < u=0.04: the gate stays on the reported scale.
+    # (If u had been switched to sigma, 0.019 would also fail, but 0.03 would
+    # have been the one to check: 0.03 < 0.04 would have been rejected.)
+    selected, _label, reason, _target = gp_ml._select_by_ei(
+        [11], _ei_table(0.019), params)
+    assert reason is not None and "uncertainty threshold" in reason
+
+
+def test_ei_preview_uses_the_posterior_std():
+    from gpevo.FunctionFolder.USPEX.src import gp_plot
+
+    params = gp_ml.parse_gp_params(_org(".", ".", u=0.04, k=1, den=1.8))
+    records = [{"number": 11, "dgp": 1.90, "sigma": 0.098, "sd": 0.05,
+                "residual": 1.0}]
+    selected, _f_best, _top = gp_plot._ei_preview(records, params)
+    assert len(selected) == 1
+    assert selected[0][0] == pytest.approx(
+        gp_ml._expected_improvement(1.90, 0.05, 1.90))
+
+# ────────────────────────────────────────────────────────────────────
+#  f_best: same incumbent in selection and report, plus calibration
+# ────────────────────────────────────────────────────────────────────
+
+def test_observed_density_incumbent_reads_the_dft_best(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "feature.csv").write_text(
+        _HEADER + "\n"
+        "0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.80\n"
+        "1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.8991\n"
+        "2, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.85\n",
+        encoding="utf-8")
+    org = _org(str(tmp_path), str(tmp_path / "results1"), opt_type=11)
+    assert gp_ml.observed_density_incumbent(org) == pytest.approx(1.8991)
+
+
+def test_ei_preview_uses_the_observed_incumbent():
+    from gpevo.FunctionFolder.USPEX.src import gp_plot
+
+    params = gp_ml.parse_gp_params(_org(".", ".", u=0.001, k=1, den=1.0))
+    records = [{"number": 11, "dgp": 1.8032, "sigma": 0.098, "sd": 0.05,
+                "residual": 1.0}]
+    _, f_best_fallback, _ = gp_plot._ei_preview(records, params)
+    _, f_best_observed, _ = gp_plot._ei_preview(records, params,
+                                                 incumbent=1.8991)
+    assert f_best_fallback == pytest.approx(1.8032)
+    assert f_best_observed == pytest.approx(1.8991)
+
+
+def test_select_by_ei_reports_the_incumbent_gap(run, capsys):
+    _home, _res_folder, data_dir = run
+    os.makedirs(data_dir, exist_ok=True)
+    with open(os.path.join(data_dir, "feature.csv"), "w",
+              encoding="utf-8") as fd:
+        fd.write(_HEADER + "\n"
+                 "0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.8991\n")
+    params = gp_ml.parse_gp_params(
+        _org(str(_home), _res_folder, k=1, den=1.0, u=0.001))
+    nan = float("nan")
+    table = {11: [nan, 1.0, nan, nan, 1.8032, 0.05, nan, -10.0, 0.05]}
+    gp_ml._select_by_ei([11], table, params, data_dir)
+
+    out = capsys.readouterr().out
+    assert "max predicted this generation" in out
+    assert "EI ~ exploration" in out
+
+
+def test_gp_calibration_regression_prints_after_three_labels(tmp_path, capsys):
+    res = str(tmp_path / "results1")
+    os.makedirs(res, exist_ok=True)
+    with open(os.path.join(res, "density.log"), "w", encoding="utf-8") as fd:
+        fd.write("# Crystal_id Density Energy\n")
+        for cid, y in ((1, 1.80), (2, 1.85), (3, 1.90)):
+            fd.write(f"{cid} {y:.6f} -100.0\n")
+    gp_ml._CALIBRATION.clear()
+    gp_ml._CALIBRATION_DIR = None
+
+    gp_ml._record_gp_calibration(res, {1, 2, 3},
+                                 {1: 1.75, 2: 1.80, 3: 1.85})
+
+    out = capsys.readouterr().out
+    assert "GP calibration (n=3 labelled)" in out
+    assert "mean(mu-y) = -0.0500" in out
+
+# ────────────────────────────────────────────────────────────────────
+#  §2.3 shared residual cutoff
+# ────────────────────────────────────────────────────────────────────
+
+def test_residual_cut_is_a_single_shared_constant():
+    from gpevo.runtime import RESIDUAL_CUT
+    from gpevo.FunctionFolder.USPEX.src import gp_plot
+    from gpevo.tools import ei_report
+    from gpevo.uspexkit import core
+
+    assert RESIDUAL_CUT == 5.0
+    assert gp_ml.RESIDUAL_CUT is RESIDUAL_CUT
+    assert gp_plot.RESIDUAL_CUT is RESIDUAL_CUT
+    assert ei_report.RESIDUAL_CUT is RESIDUAL_CUT
+    assert core.RESIDUAL_CUT is RESIDUAL_CUT
+
+
+def test_ei_filter_uses_the_shared_cutoff():
+    from gpevo.runtime import RESIDUAL_CUT
+
+    params = gp_ml.parse_gp_params(_org(".", ".", u=0.001, k=1, den=1.0))
+    nan = float("nan")
+
+    def _table(residual):
+        return {11: [nan, residual, nan, nan, 1.90, 0.05, nan, -10.0, 0.05]}
+
+    # 7 used to pass the old hardcoded 10; it must now be rejected.
+    _sel, _label, reason, _target = gp_ml._select_by_ei(
+        [11], _table(RESIDUAL_CUT + 2), params)
+    assert reason is not None and "no crystal with a usable" in reason
+
+    _sel, _label, reason, _target = gp_ml._select_by_ei(
+        [11], _table(RESIDUAL_CUT - 1), params)
+    assert reason is None
+
+
+

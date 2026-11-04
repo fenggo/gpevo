@@ -6,6 +6,7 @@ USPEX  : calculationMethod (USPEX, VCNEB, META)
 1      : optType 
 0.2    : SymTolerance
 1      : checkMolecules
+0      : fixRandSeed   ! >0 固定随机种子（rng(seed+generation)，可复现/配对实验）；0=时钟种子
 
 % atomType
 C O N H

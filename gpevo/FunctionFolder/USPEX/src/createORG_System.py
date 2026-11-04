@@ -47,6 +47,16 @@ def createORG_System(inputFile):
     ORG = G["ORG_STRUC"]
     p = InputParser(inputFile)
 
+    # MATLAB names the INPUT option ``fixRandSeed`` (createORG_System.m:11)
+    # and the ORG field ``fixRndSeed``.  A positive value pins the RNG stream
+    # (Start.m:59 / Initialize.m:24 / PickUp.m:29); 0 keeps the clock seed.
+    raw = p.option("fixRandSeed") or p.option("fixRndSeed")
+    if raw is not None:
+        try:
+            ORG.fixRndSeed = int(float(raw))
+        except (TypeError, ValueError):
+            pass
+
     raw = p.scalar("optType")
     if raw is not None:
         s = str(raw)

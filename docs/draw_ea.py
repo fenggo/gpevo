@@ -119,7 +119,7 @@ arrow(ax, GX, 7.65, GX, 7.2)
 
 # G2: Scan & Filter
 draw_box(ax, GX, 6.85, 3.0, 0.65, C_GPML, 'Scan & Filter', C_WHITE, 8, True)
-ax.text(GX, 6.55, 'residual > 10 → skip (damaged)', ha='center', fontsize=6.5, color='#d7bde2')
+ax.text(GX, 6.55, 'residual > 5 → skip (damaged)', ha='center', fontsize=6.5, color='#d7bde2')
 
 arrow(ax, GX, 6.5, GX, 6.05)
 

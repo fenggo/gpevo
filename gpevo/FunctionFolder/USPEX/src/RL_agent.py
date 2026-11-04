@@ -268,8 +268,18 @@ def RL_agent(popSize):
                 cell["m"] = (m_old * n_old + u * reward) / n_new
                 cell["neff"] = n_new
 
-    state["alpha"] = np.maximum(lam * np.asarray(state["alpha"], dtype=float) + wins, 1e-3)
-    state["beta"] = np.maximum(lam * np.asarray(state["beta"], dtype=float) + (trials - wins), 1e-3)
+    # Beta-Bernoulli needs successes in [0, trials].  ``reward`` is a real
+    # score in [0, w1+w2] (elite flag + clipped enthalpy gain), so raw ``wins``
+    # can exceed ``trials``; ``beta`` then goes negative, is clamped to 1e-3,
+    # and theta ~ 1 makes that arm dominate forever.  Normalise to fractional
+    # successes before the update (the inner Gaussian above keeps raw reward).
+    scale = max(w1 + w2, 1e-12)
+    successes = np.minimum(wins / scale, trials)
+    state["alpha"] = np.maximum(
+        lam * np.asarray(state["alpha"], dtype=float) + successes, 1e-3)
+    state["beta"] = np.maximum(
+        lam * np.asarray(state["beta"], dtype=float) + (trials - successes),
+        1e-3)
 
     # ---- draw the next generation's fractions ---------------------------
     count = np.zeros(K, dtype=float)
@@ -316,7 +326,8 @@ def RL_agent(popSize):
         {
             "gen": int(getattr(POP, "generation", 0)),
             "trials": trials.copy(),
-            "wins": wins.copy(),
+            "wins": wins.copy(),          # raw reward sum, before normalising
+            "successes": successes.copy(),  # what actually fed the Beta update
             "f": f.copy(),
             "u": next_u.copy(),
         }

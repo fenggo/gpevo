@@ -32,8 +32,9 @@ import os
 import random
 import re
 
+from gpevo.runtime import RESIDUAL_CUT
+
 UNCERT_SCALE = 1.96          # gp.csv / density_predict.log store 1.96 * std
-RESIDUAL_CUT = 10.0          # CalcFitness_310 keeps residual <= 10
 
 _LEARNING_CURVE = re.compile(
     r"GP learning curve \(gen\s+(\d+)\):\s*rows\s+(\d+)\s*->\s*(\d+)"

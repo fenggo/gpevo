@@ -127,3 +127,45 @@ def test_rl_inner_is_read_from_input(tmp_path):
     path = tmp_path / "INPUT.txt"
     path.write_text("angle : RL_inner\n", encoding="utf-8")
     assert InputParser(str(path)).option("RL_inner") == "angle"
+
+def _all_elite_pop():
+    """Six offspring of one arm, all in the elite pool, with a spread of gains."""
+    pop = AttrDict()
+    pop.generation = 3
+    pop.ranking = list(range(6))
+    pop.bad_rank = 0
+    pop.POPULATION = []
+    for i in range(6):
+        individual = AttrDict()
+        individual.Enthalpies = np.array([-100.0 - i])
+        individual.howCome = "Rotate"          # arm 4
+        pop.POPULATION.append(individual)
+    return pop
+
+
+def test_reward_above_one_does_not_clamp_beta(tmp_path, monkeypatch):
+    """wins > trials must not push beta to its floor (the arm would dominate)."""
+    import pickle
+    from gpevo.FunctionFolder.USPEX.src.RL_agent import RL_agent, STATE_FILE
+
+    monkeypatch.chdir(tmp_path)
+    G["ORG_STRUC"] = _org(bestFrac=1.0)       # every offspring is elite
+    G["POP_STRUC"] = _all_elite_pop()
+    try:
+        RL_agent(6)
+        with open(STATE_FILE, "rb") as fh:
+            state = pickle.load(fh)
+    finally:
+        G["ORG_STRUC"] = None
+        G["POP_STRUC"] = None
+
+    beta = np.asarray(state["beta"], dtype=float)
+    alpha = np.asarray(state["alpha"], dtype=float)
+    # arm 4 has all 6 trials; the raw reward sum (~7.1) exceeds trials, which
+    # used to make beta negative and clamp it to 1e-3.
+    assert beta[3] > 0.5, beta
+    assert alpha[3] > 1.0, alpha
+    assert (beta > 1e-3 + 1e-9).all(), beta
+    hist = state["history"][-1]
+    assert (hist["successes"] <= hist["trials"]).all()
+

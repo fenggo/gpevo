@@ -24,6 +24,7 @@ from .utils import (read_individuals, search_structure,generate_hbond_lib,
                             lammps_opt_mtp,
                             write_output,write_geometry)
 from pymatgen.io.ase import AseAtomsAdaptor
+from gpevo.runtime import RESIDUAL_CUT
 # from irff.md.lammps import writeLammpsData,writeLammpsIn,get_lammps_thermal,lammpstraj_to_ase
 from irff.md.gulp import write_gulp_in,get_reax_energy ,opt
 # from irff.dft.dftb import dftb_opt
@@ -34,6 +35,22 @@ from irff.molecule import Molecules,enlarge, SuperCell,repulse,reassemble # molt
 ''' A work flow in combination with USPEX 
     High-Throughput Evolutionary Crystal Structure Prediction Method
 '''
+
+def standardized_residual(feature, X, scaler):
+    """Squared distance to every labelled row, in the STANDARDISED feature space.
+
+    ``X`` is the already-standardised training matrix and ``scaler`` the fitted
+    StandardScaler.  Returns ``(res, imin, X_)``: per-row squared distances,
+    the nearest row index, and the (1, d) transformed query feature reused by
+    the GP prediction.  Raw feature columns have wildly different units (eV vs
+    g/cm3), so a raw Euclidean distance is >98% dominated by two energy columns
+    -- see docs/algorithm_review.md §2.3.  ``RESIDUAL_CUT`` is calibrated on
+    this standardised distance.
+    """
+    X_ = scaler.transform(np.asarray(feature, dtype=float).reshape(1, -1))
+    res = np.sum(np.square(X - X_[0]), axis=1)
+    return res, int(np.argmin(res)), X_
+
 
 def supercell(gen=None,traj=None,x=1,y=1,z=1,i=None):
     if traj is None:
@@ -200,11 +217,6 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     d      = data[:,1:]    # 去掉索引
     # f==2 只对查询 feature 做 nmol 平均, 训练数据 d 保持原始总能量不动
 
-    # Train a Gaussian Process 
-    res    = np.sum(np.square(d - feature),axis=1)
-    ind    = np.where(res<tolerance)
-    imin   = np.argmin(res)
-
     ### prepare data 
     X_raw  = d
     y      = data_[:,-1]
@@ -216,7 +228,10 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
 
     scaler = preprocessing.StandardScaler().fit(X_raw)
     X      = scaler.transform(X_raw)
- 
+    # Distance to the training manifold in the SAME space the GP is fitted in.
+    res, imin, X_ = standardized_residual(feature, X, scaler)
+    ind    = np.where(res < tolerance)
+
     gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
     rfr_density = load_rfr(X, y)
     if not exists('gp.csv'):
@@ -225,8 +240,6 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                 '          uncertainty,           energy_min,       eng_pred,        uncertainty_eng,'
                 '      density_gp_updated,  uncertainty_updated',file=fd)
 
-    # X_ = np.concatenate((X,np.expand_dims(feature,axis=0)))  #X_train.extend(feature)
-    X_ = scaler.transform(np.expand_dims(feature,axis=0))
     mean_prediction, std_prediction = gpr_density.predict(X_, return_std=True)
     mean_eng_pred, std_eng_pred = gpr_energy.predict(X_, return_std=True)
     density_rf = rfr_density.predict(X_)
@@ -235,7 +248,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     density_= mean_prediction[0] # data_[ind[0][im],-1]
     # if ((density_>np.max(y)*1.1 and (density_/density>1.5 or  density/density_>1.5)) or 
     #     (density_>np.max(y) and res[imin]>10) ):
-    if res[imin]>10:
+    if res[imin] > RESIDUAL_CUT:
        if density_rf[0]/density>1.5 or  density/density_rf[0]>1.5:
           density_ = density*d_scaler
        else:
@@ -274,7 +287,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                  #     print(data_pred.shape[0],file=fg)
                  #     print(density_,0.9*Density[imax],file=fg)
                  if density_ >= 0.98*Density[imax] and density_ >= den:
-                    if std_prediction[0]>u and res[imin]< 5.0:
+                    if std_prediction[0]>u and res[imin] < RESIDUAL_CUT:
                        subprocess.call("cp ../Specific/*.psf ./", shell=True)
                        img = siesta_opt(atoms, ncpu=n, us="F", VariableCell="true", tstep=step,
                                              xcf="GGA", xca="PBE", basistype="split")
@@ -757,9 +770,12 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
             else:
                 feature = np.array([e[0],e[5],e[8],e[10],e[11],e[12],density])
 
-        ind, imin, res_ = search_structure(feature, D, tolerance=tolerance)
+        # ``search_structure``'s raw distance is a structure-matching measure;
+        # the GP residual reported to gpevo is the standardised one (§2.3).
+        ind, imin, _ = search_structure(feature, D, tolerance=tolerance)
+        res, imin, X_ = standardized_residual(feature, X, scaler)
+        res_ = float(res[imin])
 
-        X_ = scaler.transform(np.expand_dims(feature, axis=0))
         density_pred, std_den_pred = gpr_density.predict(X_, return_std=True)
         energy_pred, std_eng_pred = gpr_energy.predict(X_, return_std=True)
         energy_pred  = energy_pred[0]
@@ -871,6 +887,12 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
                 D = data[1:]
                 D_ = data_[1:]
             ind, imin, res_ = search_structure(feature, D, tolerance=tolerance)
+            # Console-only diagnostic: report the same standardised residual as
+            # gp()/pred(); the raw ``res_`` is a structure-matching distance.
+            _D = np.atleast_2d(D)
+            _sc = preprocessing.StandardScaler().fit(_D)
+            _res, _, _ = standardized_residual(feature, _sc.transform(_D), _sc)
+            res_ = float(np.min(_res))
         else:
             ind = [[]]
             with open("feature_mlp.csv", "w") as fd:
