@@ -1,9 +1,15 @@
-"""Build script for GPEvo's Cython extension.
+"""Build script for GPEvo's Cython extensions.
 
 Metadata (name, version, dependencies, package data) lives in pyproject.toml;
-this file only compiles the ``random_cell_mol_cy`` Cython extension, which needs
-no numpy headers.  (The uspexkit fingerprint extension was removed — gpevo
-computes its own fingerprint and writes it into Individuals.)
+this file compiles the two ACTIVE extensions (random_cell_mol_cy and
+molcheck_cy).  Neither needs numpy headers: they use the buffer protocol via
+typed memoryviews.
+
+FunctionFolder/sys/uspex_fast_core.pyx is deliberately NOT built here.  It is
+a dormant Octave-era fingerprint accelerator: gpevo computes its own
+fingerprint in fingerprint_utils.py (pure numpy) and writes it into
+Individuals.  Building it would activate an unused fast path whose erf
+approximation differs from scipy's by ~1e-6.  See docs/fingerprint_method.md.
 """
 
 import os
@@ -32,6 +38,11 @@ extensions = [
         "gpevo.FunctionFolder.spacegroup.random_cell_mol_cy",
         "gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.pyx",
         "gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.c",
+    ),
+    _ext(
+        "gpevo.FunctionFolder.sys.molcheck_cy",
+        "gpevo/FunctionFolder/sys/molcheck_cy.pyx",
+        "gpevo/FunctionFolder/sys/molcheck_cy.c",
     ),
 ]
 extensions = [e for e in extensions if e is not None]

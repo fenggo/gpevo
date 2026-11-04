@@ -2,13 +2,21 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 
 """
-uspex_fast_core.pyx — USPEX 后处理加速核心 v2
+uspex_fast_core.pyx — USPEX 后处理加速核心 v2 (DORMANT / 未接入构建)
 
 替代 Octave 中 makeMatrices.m + fingerprint_calc.m 的热路径。
 v2 关键改进：build_distance_matrix 返回 cc_index/bc_index，
 使 fingerprint_calc 可以用纯 Cython nogil 循环，无需 Python 层 mask。
 
-编译:  python3 setup_fast.py build_ext --inplace
+状态：gpevo 故意不编译这个文件。setup.py 只构建 random_cell_mol_cy 与
+molcheck_cy；指纹由 fingerprint_utils.py 的纯 numpy 实现计算。
+fingerprint_utils._cy_fingerprint 仍保留一个可选快路径，但 import 永远
+失败（没有 .so），所以实际一直是纯 numpy。
+
+若将来要启用：需要 cimport numpy 的头文件（include_dirs=np.get_include()、
+NPY_NO_DEPRECATED_API 宏）、把 numpy 加进 [build-system].requires，并把
+_erf_approx 换成 libc.math.erf 以消除与 scipy 约 1e-6 的数值偏差。
+详见 docs/fingerprint_method.md 与 docs/algorithm_review.md §6.1。
 """
 
 import numpy as np

@@ -33,6 +33,7 @@
 - **分子晶体进化搜索（310）**：heredity / random / softmutation / permutation / latmutation / rotmutation 全部遗传算子 + 精英保留，与 MATLAB 版同一套流程；另含一个可选的 **swarm 算子**（分子感知刚体移动，见 [swarm 算子](#swarm-算子可选)）。
 - **GP 主动学习**：每个结构经 `uspexkit.gp()` 预测密度/能量与不确定度；训练集**自动生长**——第一代结束时用参考方法给最优的若干个结构打标签建立数据库，之后每代按 EI（或不确定度/随机）选 top-K 打标签追加进训练集、失效模型缓存后重训、重预测，再回写适应度。
 - **对称性与随机结构生成**：230 个空间群的 Wyckoff 展开，`random_cell_mol` 的 Cython 移植（`pip install .` 时自动编译）。
+- **分子合法性检查**：`newMolCheck` 的原子对距离扫描也有 Cython 内核（`molcheck_cy.pyx`），8 分子体系约 85× 加速；扩展未编译时自动回退到纯 numpy 实现。
 - **集群提交**：本地子进程与远程调度器两条路径，MPI 环境变量自动处理。
 - **GP 训练集自举**：不需要预先准备 `feature_mlp.csv` / `feature.csv` / `structures.traj`，空目录（甚至不存在的目录）会在第一代结束时自动建起来。
 - **自动绘图**：每代评估完成后，在 `results*/` 生成四面板 GP 状态图（`gp_gen*.png`）。

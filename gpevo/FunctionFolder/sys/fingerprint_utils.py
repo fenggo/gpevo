@@ -4,9 +4,14 @@ This module is a direct port of the relevant pieces of
 ``FunctionFolder/sys/makeMatrices.m``, ``fingerprint_calc.m``,
 ``structureQuasiEntropy.m`` and ``StructureOrder.m``.  It keeps the same
 matrix conventions as the Octave implementation, while using the flattened
-neighbour-pair representation already used by the Cython ``uspex_fast_core``
-bridge, so it can be called directly from the Python package without shelling
-out or importing platform-specific C extensions.
+neighbour-pair representation used by the Octave-era ``uspex_fast_core``
+bridge.
+
+The optional Cython fast path below (``_cy_fingerprint``) is deliberately
+dormant: ``setup.py`` does not build ``uspex_fast_core.pyx``, so the import
+always fails and every call falls through to this pure-numpy implementation.
+It is retained only as a documented alternative; see docs/fingerprint_method.md
+§6.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ def _as_int_array(values):
 
 
 def _cy_fingerprint(coords, lattice, rmax, num_ions, sigma, delta, dimension, intra_map=None, atom_type=None):
-    '''Use the bundled Cython uspex_fast_core extension when available.'''
+    '''Dormant optional fast path: None unless the unbuilt extension exists.'''
     if _ufc is None:
         return None
     try:

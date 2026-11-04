@@ -274,6 +274,75 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 
 ## 5. 复核入口
 
-- `tests/` 当前 154 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
+- `tests/` 当前 183 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
 - 全仓 `pytest` 会被 `dnmt/train/plot_gp_test.py`（未跟踪的数据目录）挡住收集，与代码无关。
 - `README.md` §「GP 主动学习」、`docs/ei_theoretical_basis.md` §6 是已有的理论基线，改动前先对齐口径。
+
+---
+
+## 6. 性能补记：`newMolCheck` 的 Cython 内核
+
+> 起因：permutation 算子被认为慢。实测 `Permutation_310.py` 自身的交换 / 平移
+> 循环 < 0.05 ms，而一次完整通过的 `newMolCheck` 为 **125 ms**（8 分子、
+> ~30 原子/分子、TNT/CL20 量级）；50 次重试上限约 7 s。`newMolCheck` 是
+> **7 个变异算子共用**的，且 results2 每代 permutation 只产 2 个结构、
+> rotmutation 产 55 个，所以真正吃掉时间的是共享的距离检查，不是 permutation。
+
+**做法**：`gpevo/FunctionFolder/sys/molcheck_cy.pyx` 用 typed memoryviews +
+`nogil` 把分子间原子对（约 2.5 万对）与分子内 124 个周期镜像的扫描放进纯 C；
+`setup.py` 增加第二个 `Extension`（与已有的 `random_cell_mol_cy` 同一套
+`cythonize` 指令：`boundscheck=False` / `wraparound=False` / `cdivision=True` / `-O3`）。
+`newMolCheck.py` 保留原纯 numpy 实现作为**参考 oracle 与未编译时的兜底**，
+`tests/test_molcheck_cy.py` 用 29 个用例断言两者逐位一致（随机结构、被拒结构、
+非正交晶格、半整数分数坐标、空分子、负阈值）。
+
+**实测**（本仓库，anaconda python 3.12）：
+
+| 情形 | 纯 numpy | Cython | 加速 |
+|---|---|---|---|
+| 完整通过（无提前 return） | 124.7 ms | 1.46 ms | **85.6×** |
+| 提前拒绝 | 2.58 ms | 0.078 ms | 33× |
+| 非正交晶格 | 114.7 ms | 1.27 ms | 90.4× |
+| `newMolCheck` 端到端 | 125.1 ms | 1.50 ms | 83× |
+
+**语义保持**（与 MATLAB 对拍相关，勿随意改）：
+
+- 最小镜像用 `np.round` 的**半偶舍入**（`_rint` 复刻），不是 C `round` 的半远离零；
+- 笛卡尔位移是 `dfrac @ lat`（按 `lat` 的列求和）；
+- 距离用 `sqrt(x²+y²+z²)` 与阈值比较，等价于 `np.linalg.norm(v, axis=1) <= thr`；
+- 首个违规立即返回 0（坏子代仍然便宜）；
+- `Permutation_310` / `LatMutation_310` / `Mutation_310` / `Random_310` 仍用
+  `valid_molecules(..., 0)`，而 heredity / rotation / swarm 用 `-0.2`、softmode
+  用 `-0.1` —— 与 MATLAB `Permutation_310.m:81` 一致，**没有**顺手改阈值。
+
+**部署**：`.so` 与生成的 `.c` 都在 `.gitignore` 里；`pip install -e .`（或
+`python setup.py build_ext --inplace`）后生效。未编译时自动回退纯 numpy，
+行为不变只是慢。`~/ct22` 这类从运行目录启动的计算用的是 site-packages 的
+非 editable 副本，必须重装才会用到新内核。
+
+### 6.1 `uspex_fast_core.pyx` 的评估结论：保持 dormant，不接入
+
+`gpevo/FunctionFolder/sys/uspex_fast_core.pyx`（386 行）是 Octave 时代的指纹
+加速内核，被 `pyproject.toml` 列为 package-data，但 `setup.py` 从未编译它。
+`fingerprint_utils.py:17` 的 `try: import ... / except: _ufc = None` 与
+`:317` / `:349` 的 `_cy_fingerprint` 因此是**永不执行的死代码**。
+
+本轮评估过「接进 `setup.py`」：Cython 3.0.11 与 gcc 都能编译（需 numpy
+头文件 + `NPY_NO_DEPRECATED_API` 宏；`setup.py` 的 `_ext()` 目前不传这些，
+且 `numpy` 不在 `[build-system].requires`）。实测 228 原子体系快 7.4×、
+8 分子中心快 115×，但 `_erf_approx` 与 `scipy.special.erf` 差约 1e-6，
+会改变 OUTPUT.txt 的指纹 / `S_order` 数值与边界相似性判定。**结论：不接。**
+
+本轮按「不接、只清理矛盾」处理，**没有删除任何代码或文件**：
+
+- 修正 `uspex_fast_core.pyx` 头部那条不存在的 `setup_fast.py` 编译命令，
+  改为明确的 DORMANT 状态说明与「若启用需要什么」；
+- 修正 `setup.py` 开头 docstring（被删的是 uspexkit 那份，不是 sys/ 这份）；
+- 修正 `fingerprint_utils.py` 头部与 `_cy_fingerprint` 的误导性描述；
+- 修正 `docs/feature_ablation.md` 的「已按冗余删除」口径；
+- 在 `docs/fingerprint_method.md` 补 §6，把 Octave 的 2,780× 与 gpevo 的
+  纯 numpy 现状分开；`pyproject.toml` 给该 `.pyx` 加 dormant 注释。
+
+若将来要真正移除死代码，候选是：`fingerprint_utils.py` 的 `_ufc` import /
+`_cy_fingerprint` / 两处调用点，以及 `uspex_fast_core.pyx` 本体。这两项
+**没做**，按默认保留原则留待明确指示。

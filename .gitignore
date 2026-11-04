@@ -8,6 +8,7 @@ dist/
 # Cython 生成物（pip install . 时会从 .pyx 重新编译）
 *.so
 gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.c
+gpevo/FunctionFolder/sys/molcheck_cy.c
 
 # 运行/训练产物
 *.pkl

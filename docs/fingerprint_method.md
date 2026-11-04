@@ -84,3 +84,39 @@ The Cython implementation was verified against the original Octave code by extra
 [1] A. R. Oganov and M. Valle, *J. Chem. Phys.* **130**, 104504 (2009).
 
 [2] A. R. Oganov, A. O. Lyakhov, and M. Valle, *Acc. Chem. Res.* **44**, 227–237 (2011).
+
+### 6. Status in the gpevo Python port (2026-11-04)
+
+Sections 1-5 describe the historical **Octave + Cython** workflow.  The gpevo
+Python port is different, and the two should not be conflated:
+
+| | Octave/USPEX (above) | gpevo (current) |
+|---|---|---|
+| Fingerprint implementation | `makeMatrices.m` / `fingerprint_calc.m`, optionally the `uspex_fast_core` Cython bridge | `gpevo/FunctionFolder/sys/fingerprint_utils.py`, pure numpy + `scipy.special.erf` |
+| `uspex_fast_core` | built and called through `fast_fingerprint.m` | file retained at `gpevo/FunctionFolder/sys/uspex_fast_core.pyx` but **deliberately not built** by `setup.py` |
+| Claimed 2,780x speedup | Octave vs Cython, per 228-atom structure | **not applicable**: the pure-numpy path is already vectorised |
+
+`fingerprint_utils.py` still contains a guarded `try: import uspex_fast_core`
+and an optional `_cy_fingerprint` fast path.  Because no `.so` is ever built,
+that import always fails (`_ufc = None`) and every call falls through to the
+pure-numpy implementation.  It is dead-but-retained code, kept as a documented
+alternative rather than deleted.
+
+It was evaluated for activation and left dormant for two reasons:
+
+1. **Numerical parity.** The Cython kernel uses an Abramowitz-Stegun erf
+   approximation (Section 4), while the pure-numpy path uses
+   `scipy.special.erf`.  Measured differences on a 228-atom cell: `order`
+   ~3e-8, `fing` ~7e-7, `atom_fing` ~1e-6, volume ~7e-13.  Activating it
+   would change OUTPUT.txt fingerprint / `S_order` columns and could flip
+   borderline comparisons in `SameStructure_order` (`tolerance_o = 0.075`)
+   and anti-seed cosine distances.
+2. **Modest benefit in this codebase.** Measured on the same 228-atom system:
+   molecular-centre fingerprint 29.4 ms -> 0.26 ms (115x), full-atom
+   fingerprint 846 ms -> 114 ms (7.4x).  That is ~76 s saved per 100-structure
+   generation, small next to the ~2.5 h generation dominated by GULP/ReaxFF.
+
+If it is ever enabled, `setup.py` needs `include_dirs=[np.get_include()]`,
+`NPY_NO_DEPRECATED_API`, `numpy` in `[build-system].requires`, and replacing
+`_erf_approx` with `libc.math.erf` to remove the parity gap.  See
+`docs/algorithm_review.md` Section 6.1 for that evaluation.

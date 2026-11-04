@@ -19,7 +19,7 @@ GP 的输入是 `uspexkit` 造的 10 维特征（`feature_mlp.csv`），输出 D
 
 每个弛豫完的个体**已经**带着 RDF 指纹（`FINGERPRINT`，见 `fingerprint_utils.py`），所以很自然会想把它拼到这 10 维后面。本实验就是量这件事。
 
-> 注：这里说的指纹来自 gpevo 自己的 `FunctionFolder/sys/fingerprint_utils.py`。原本 `uspexkit` 里那份 `uspex_fast_core`（同样的 RDF 指纹）已按冗余删除——gpevo 自己就在算，两者是同一类东西。
+> 注：这里说的指纹来自 gpevo 自己的 `FunctionFolder/sys/fingerprint_utils.py`（纯 numpy）。`uspexkit` 里那份同名的 `uspex_fast_core` 已按冗余删除；gpevo 自己也留了一份 `gpevo/FunctionFolder/sys/uspex_fast_core.pyx`，但**故意没有接进 `setup.py`**，因此从未编译、从未生效，实际计算一直走 `fingerprint_utils.py`。详见 `docs/fingerprint_method.md` §6 的状态说明。
 
 ## 2. 实验设计
 

@@ -43,7 +43,8 @@ gpevo = [
     "FunctionFolder/spacegroup/random_cell_mol.py",
     "FunctionFolder/spacegroup/random_cell_mol",
     "FunctionFolder/spacegroup/data/*.txt",
-    "FunctionFolder/sys/uspex_fast_core.pyx",
+    "FunctionFolder/sys/uspex_fast_core.pyx",  # dormant, NOT built (see setup.py)
+    "FunctionFolder/sys/molcheck_cy.pyx",
     "FunctionFolder/sys/*.so",
     # vendored uspexkit subset (gp/pred/calc/add)
     "uspexkit/LICENSE",
