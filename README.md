@@ -88,6 +88,7 @@ gpevo                # 或 python -m gpevo
 | 文件/目录 | 内容 |
 |---|---|
 | `OUTPUT.txt` | 运行日志，含逐代 `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` 表；GP 开启时追加 `Enthalpy(GP) UC Density(GP) UC` 四列 |
+| `results1/Parameters.txt` | 启动时 `INPUT.txt` 的字节级副本（对应 MATLAB `Start.m:66` 的 `cp`）；只在新建 `results<N>` 时写一次，重启不覆盖，用来复盘该次计算最初的设置 |
 | `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`origin`、`gp_gen*.png`、`density_predict.log` |
 | `CalcFold1/`… | 每个结构的弛豫/GP 计算目录，`gp.csv` 记录每次 GP 预测 |
 | `results*/<ID>/` | 某个结构走参考方法（SIESTA）打标签的工作目录；上一轮中断留下的空目录会在下次选点时自动清理 |

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from importlib import import_module as _im
 
@@ -45,6 +46,23 @@ def _setup_rng(ORG, generation=None):
     import random as _random
     _random.seed(seed)
     return seed, source
+
+
+def _save_parameters(input_file="INPUT.txt", res_folder=""):
+    """Save a byte-for-byte INPUT.txt copy as results<N>/Parameters.txt.
+
+    Start.m:66 does ``cp inputFile resFolder/Parameters.txt`` in the fresh-run
+    branch only and ignores the shell return code.  Same semantics here: a
+    failed copy must not kill the calculation, and a restart must not touch the
+    snapshot (it records the settings the run STARTED with).  The warning goes
+    to the terminal only, so OUTPUT.txt stays byte-identical.
+    """
+    if not res_folder:
+        return
+    try:
+        shutil.copyfile(input_file, os.path.join(res_folder, "Parameters.txt"))
+    except OSError as exc:
+        console_print(f"  Warning: could not save Parameters.txt: {exc}")
 
 
 # Attributes a restart must keep from the checkpoint even though INPUT.txt
@@ -294,6 +312,7 @@ def Start():
     else:
         ORG = createORGStruc("INPUT.txt")
         G["ORG_STRUC"] = ORG
+        _save_parameters("INPUT.txt", ORG.resFolder)
         seed, source = _setup_rng(ORG)
         console_print(f"  RNG seed: {seed} (fresh, {source})")
         CreateCalcFolder(1)
