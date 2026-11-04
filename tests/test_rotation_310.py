@@ -60,3 +60,110 @@ def test_twist_rotates_subtree_keeps_connectivity():
     assert np.allclose(accepted[1], coords[1])
     # Atom 2 lies on the rotation axis -> unchanged.
     assert np.allclose(accepted[2], coords[2])
+
+
+# ---------------------------------------------------------------------------
+#  Regression: STDMOL / molRefBonds are keyed by molecule TYPE, not position.
+#  A cell with MtypeLIST=[1,1,2,2] has the flex-declaring type (2) at
+#  positions 2,3 -- beyond len(STDMOL)=2.  Indexing by position skipped them
+#  entirely and made the group-rotation ratio permanently zero (ct22/results3).
+# ---------------------------------------------------------------------------
+
+def _two_type_offspring():
+    """2-atom type-1 molecules (no flex) + 4-atom type-2 molecules (flex)."""
+    t1 = np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]])
+    t2 = np.array([[0.0, 0.0, 0.0], [1.5, 0.0, 0.0],
+                   [3.0, 0.0, 0.0], [4.5, 1.0, 0.0]])
+
+    def mol(c):
+        return AttrDict(MOLCOORS=c.copy(), MOLCENTER=c.mean(0),
+                        ZMATRIX=c.copy())
+
+    child = AttrDict()
+    child.MOLECULES = [mol(t1), mol(t1), mol(t2), mol(t2)]
+    child.MtypeLIST = [1, 1, 2, 2]
+    child.LATTICE = np.diag([60.0, 60.0, 60.0])
+    return child, t1, t2
+
+
+def test_group_rotation_reaches_molecules_past_the_template_count(monkeypatch,
+                                                                  capsys):
+    """Type-2 copies at positions 2,3 must get their flexible-dihedral twist."""
+    child, t1, t2 = _two_type_offspring()
+    t1_std = AttrDict(types=[1, 1], flex_dihedral=[],
+                      format=np.zeros((2, 3), dtype=int))
+    t2_std = AttrDict(types=[1, 1, 1, 1], flex_dihedral=[(1, 2, 3)],
+                      format=np.zeros((4, 3), dtype=int))
+    org = AttrDict(
+        atomType=[6], STDMOL=[t1_std, t2_std],
+        molRefBonds=[intramol_bonds(t1, [1, 1]),
+                     intramol_bonds(t2, [1, 1, 1, 1])],
+        rotationAngleMax=np.pi / 2, translationMax=0.0, maxDihedralIter=200,
+    )
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", AttrDict(POPULATION=[AttrDict()]))
+    monkeypatch.setitem(G, "OFF_STRUC", AttrDict(POPULATION=[]))
+    monkeypatch.setattr(_rot, "pick_parent", lambda: 0)
+    monkeypatch.setattr(_rot, "copy_individual",
+                        lambda ind: _two_type_offspring()[0])
+    monkeypatch.setattr(_rot, "valid_molecules", lambda *a, **k: True)
+    monkeypatch.setattr(_rot, "recompute_zmatrix", lambda *a, **k: None)
+    monkeypatch.setattr(_rot, "finalize_offspring", lambda *a, **k: None)
+    monkeypatch.setattr(_rot, "_group_rot_gen", 0)
+    monkeypatch.setattr(_rot, "_group_rot_total", 0)
+
+    _rot.Rotation_310(1)
+
+    assert _rot._group_rot_gen >= 1, (
+        "the two type-2 (flex) molecules at positions 2,3 were never twisted")
+    assert "[group rotation]" in capsys.readouterr().out
+
+
+def test_type_lookup_does_not_apply_wrong_template(monkeypatch):
+    """A type-1 molecule must NOT receive the type-2 template's flex.
+
+    Before the fix, mi=1 (type 1) was indexed as std_mols[1] (the flex
+    template).  Give type 1 a 2-atom geometry: the flex tuple (1,2,3) is
+    out of range, so a wrong lookup yields no twist -- but with the correct
+    lookup, tidx=0 has no flex at all.  Both give no twist for those two, so
+    assert the successful offspring carries exactly the two type-2 twists.
+    """
+    child, t1, t2 = _two_type_offspring()
+    t1_std = AttrDict(types=[1, 1], flex_dihedral=[],
+                      format=np.zeros((2, 3), dtype=int))
+    t2_std = AttrDict(types=[1, 1, 1, 1], flex_dihedral=[(1, 2, 3)],
+                      format=np.zeros((4, 3), dtype=int))
+    org = AttrDict(
+        atomType=[6], STDMOL=[t1_std, t2_std],
+        molRefBonds=[intramol_bonds(t1, [1, 1]),
+                     intramol_bonds(t2, [1, 1, 1, 1])],
+        rotationAngleMax=np.pi / 2, translationMax=0.0, maxDihedralIter=200,
+    )
+    produced = []
+
+    def capture(child, how_come):
+        produced.append(child)
+
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", AttrDict(POPULATION=[AttrDict()]))
+    monkeypatch.setitem(G, "OFF_STRUC", AttrDict(POPULATION=[]))
+    monkeypatch.setattr(_rot, "pick_parent", lambda: 0)
+    monkeypatch.setattr(_rot, "copy_individual",
+                        lambda ind: _two_type_offspring()[0])
+    monkeypatch.setattr(_rot, "valid_molecules", lambda *a, **k: True)
+    monkeypatch.setattr(_rot, "recompute_zmatrix", lambda *a, **k: None)
+    monkeypatch.setattr(_rot, "finalize_offspring", capture)
+    monkeypatch.setattr(_rot, "_group_rot_gen", 0)
+    monkeypatch.setattr(_rot, "_group_rot_total", 0)
+
+    _rot.Rotation_310(1)
+
+    assert produced, "no offspring was produced"
+    off = produced[0]
+    # The two type-1 molecules (positions 0,1) must be untouched by flex: they
+    # only have 2 atoms, so their coordinates can never gain a twist.
+    assert off.MOLECULES[0].MOLCOORS.shape == (2, 3)
+    assert off.MOLECULES[1].MOLCOORS.shape == (2, 3)
+    # group_rotated came from the two type-2 molecules, not from a wrong
+    # template applied to a type-1 one.
+    assert _rot._group_rot_gen == 1

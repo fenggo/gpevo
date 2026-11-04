@@ -274,7 +274,7 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 
 ## 5. 复核入口
 
-- `tests/` 当前 183 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
+- `tests/` 当前 191 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
 - 全仓 `pytest` 会被 `dnmt/train/plot_gp_test.py`（未跟踪的数据目录）挡住收集，与代码无关。
 - `README.md` §「GP 主动学习」、`docs/ei_theoretical_basis.md` §6 是已有的理论基线，改动前先对齐口径。
 
@@ -346,3 +346,36 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 若将来要真正移除死代码，候选是：`fingerprint_utils.py` 的 `_ufc` import /
 `_cy_fingerprint` / 两处调用点，以及 `uspex_fast_core.pyx` 本体。这两项
 **没做**，按默认保留原则留待明确指示。
+
+
+---
+
+## 7. group rotation 占比恒为 0 的根因：`STDMOL` 按类型索引被写成按位置索引
+
+> 完整表格、修复代码与回归测试见姊妹篇 `docs/rotation_operator.md` §5。
+
+现象：`ct22/results3` 每代汇总 `group rotation: 0 / N (0.0%)`。
+`Rotation_310.py` 里给分子查模板曾用**胞内位置** `mi` 索引 `std_mols[mi]` /
+`ref_bonds[mi]`，并以 `mi < len(std_mols)` 保护。但 `STDMOL` / `molRefBonds`
+是**按分子类型**建的（长度 = 分子种类数）。该体系 `numMols=[2,2]`、
+`MtypeLIST=[1,1,2,2]`，`STDMOL` 只有 2 项，而 CL20（唯一声明了
+`flex_dihedral` 的类型）处在位置 2、3 → 被保护条件跳过，`_twist_dihedrals`
+从未调用 → `group_rotated` 恒 False。
+
+诊断要点：
+
+- `flex_dihedral` 来自 MOL 文件第 7 列（`optFlags[i,2]`，见
+  `AbinitCode/read_molecules.py`）。`ct22/MOL_2`（CL20）有 6 个原子非零，
+  `MOL_1`（TNT）全 0 —— 所以「没声明基团」不是原因。
+- `_twist_dihedrals` 对真实 CL20 模板几何 300/300 接受，扭转算法与
+  `intramol_bonds(cand) == ref` 判据都没问题。
+- `variation_common.recompute_zmatrix()` 早已按 `MtypeLIST[j]-1` 正确索引
+  `STDMOL`，可作为对照。
+
+修复：按 `MtypeLIST[mi]-1` 取模板与参考键集（与 MATLAB `STDMOL(k)` 一致），
+`MtypeLIST` 缺失时回退按位置。真实弛豫几何验证：`ct22/results3/generation3`
+的 8/8 个 CL20 分子扭转成功（模板键集与弛豫几何键集均为 39，一致）。
+`tests/` 全量 191 passed。
+
+教训：多拷贝共晶里「分子位置」与「分子类型」不是同一个编号；任何按数组下标
+查 `STDMOL` / `molRefBonds` 的地方都要走 `MtypeLIST`。

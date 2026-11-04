@@ -145,6 +145,11 @@ def Rotation_310(count):
             coords = np.asarray(mol.MOLCOORS, dtype=float)
             center = np.mean(coords, axis=0)
             mol.MOLCOORS = coords + (breath_factor - 1.0) * center
+        # STDMOL / molRefBonds are keyed by molecule type, which comes from
+        # MtypeLIST (1-based), not by the molecule's position in the cell.
+        # Resolve it once for the whole offspring (recompute_zmatrix does the
+        # same lookup in variation_common.py).
+        mtype_list = list(getattr(child, "MtypeLIST", None) or [])
         group_rotated = False
         for mi, mol in enumerate(child.MOLECULES):
             coords = np.asarray(mol.MOLCOORS, dtype=float)
@@ -161,12 +166,28 @@ def Rotation_310(count):
                 coords = Rotate_rigid_body(center, a[:, loop], coords, angle)
             coords = coords + (np.random.rand(3) - 0.5) * 2 * trans_max
             # --- flexible intramolecular dihedral twist (flex_dihedral) ---
-            if std_mols is not None and mi < len(std_mols):
-                std = std_mols[mi]
+            # STDMOL / molRefBonds are indexed by molecule TYPE (1-based), not
+            # by the molecule's position in the cell: a cell can hold several
+            # copies of one type (e.g. MtypeLIST=[1,1,2,2]).  MATLAB uses
+            # STDMOL(k) with the type k; recompute_zmatrix() does the same.
+            # Indexing by position skipped the CL20 copies at positions 2,3
+            # (the only flex-declaring molecules), making the group-rotation
+            # ratio always zero.
+            tidx = -1
+            if std_mols is not None:
+                if mi < len(mtype_list):
+                    tidx = int(mtype_list[mi]) - 1
+                else:
+                    tidx = mi               # fallback: no MtypeLIST, use position
+                std = std_mols[tidx] if 0 <= tidx < len(std_mols) else None
+            else:
+                std = None
+            if std is not None:
                 flex = getattr(std, "flex_dihedral", None)
                 if flex:
                     types = [int(t) for t in std.types]
-                    rb = ref_bonds[mi] if (ref_bonds is not None and mi < len(ref_bonds)) else None
+                    rb = (ref_bonds[tidx] if (ref_bonds is not None
+                          and 0 <= tidx < len(ref_bonds)) else None)
                     coords, moved = _twist_dihedrals(coords, flex, types, rb, max_dih)
                     if moved:
                         group_rotated = True
