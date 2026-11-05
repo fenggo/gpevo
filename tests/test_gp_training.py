@@ -831,7 +831,7 @@ def test_gp_calibration_regression_prints_after_three_labels(tmp_path, capsys):
     assert "mean(mu-y) = -0.0500" in out
 
 # ────────────────────────────────────────────────────────────────────
-#  §2.3 shared residual cutoff
+#  §2.3 shared residual cutoff (value restored to 10.0)
 # ────────────────────────────────────────────────────────────────────
 
 def test_residual_cut_is_a_single_shared_constant():
@@ -840,7 +840,7 @@ def test_residual_cut_is_a_single_shared_constant():
     from gpevo.tools import ei_report
     from gpevo.uspexkit import core
 
-    assert RESIDUAL_CUT == 5.0
+    assert RESIDUAL_CUT == 10.0
     assert gp_ml.RESIDUAL_CUT is RESIDUAL_CUT
     assert gp_plot.RESIDUAL_CUT is RESIDUAL_CUT
     assert ei_report.RESIDUAL_CUT is RESIDUAL_CUT
@@ -856,7 +856,7 @@ def test_ei_filter_uses_the_shared_cutoff():
     def _table(residual):
         return {11: [nan, residual, nan, nan, 1.90, 0.05, nan, -10.0, 0.05]}
 
-    # 7 used to pass the old hardcoded 10; it must now be rejected.
+    # A residual above the shared cutoff must be rejected.
     _sel, _label, reason, _target = gp_ml._select_by_ei(
         [11], _table(RESIDUAL_CUT + 2), params)
     assert reason is not None and "no crystal with a usable" in reason

@@ -1,7 +1,9 @@
 # gpevo 全盘审查：算法与方法改进建议
 
 > 本文整理自一次全仓代码审查对话，回答「gpevo 还有什么算法 / 方法上的改进空间」。
-> 状态：**§2.1–§2.5 全部已实施（见 §0.1），§3 方法层面仍是待办建议**。
+> 状态：**§2.1/§2.2/§2.4/§2.5 已实施；§2.3（残差标准化）已于 2026-11-05 撤销**，
+> 残差恢复原始特征空间距离、阈值恢复 10.0（见 §2.3 末尾的撤销记录）。
+> §3 方法层面仍是待办建议。
 > 下文所有 `file:line` 都是**实施前**提交 `c2ffa07` 的行号，实施后已整体后移；
 > 请按函数名检索（`UNCERT_SCALE`、`_to_sigma`、`observed_density_incumbent`、
 > `_setup_rng`、`_record_gp_calibration`、`_ei_preview`）。
@@ -30,7 +32,7 @@
 | §2.1 σ 口径 | `gp_ml.py` 引入 `UNCERT_SCALE=1.96` 与 `_to_sigma()`；`apply_gp_metrics` / `apply_pred_metrics` 同时存 `s.sigma_gp`（后验 σ，给 EI）与 `s.uq`（1.96σ，给 OUTPUT.txt / 误差棒 / `u` 门）；`_metrics_row` 与 `_read_gp_csv` 统一产出 σ；`gp_plot.py` 的 `_ei_preview` 用 `r["sd"]` 算 EI | 经确认，**`u` 门保留 1.96σ 标度**（`s[1]*UNCERT_SCALE > u`），现有 INPUT.txt 的 `u` 值无需重标、EI 触发行为不变；只修正 EI 公式里的数学错误 |
 | §2.2 f_best | 抽出 `_best_observed()`、新增 `observed_density_incumbent()`；`_ei_preview` 接受 observed incumbent，状态报告与真实选择用同一个 `f_best`；`_select_by_ei` 每代打印 `f_best_observed` 与 `max(μ)` 及「EI 退化为探索」告警；`_record_gp_calibration()` 用**DFT 标注前**的 μ 与 `density.log` 配对，累计 ≥3 条后打印 `y ~ μ` 回归 | **没有改采集目标本身**（μ 修正 / GP 标度 incumbent / 标度无关 EI 三个选项都保留待定）；`optType=1` 时状态报告仍用 `max(dgp)`，因为它的 incumbent 是能量、与密度不同量纲 |
 | §2.4 bandit reward | `RL_agent.py` 在 Beta 更新前把 `wins/(w1+w2)` 归一化到 `[0, trials]` 的 fractional successes；内层连续参数的高斯加权更新仍用原始 reward；`history` 同时记录原始 `wins` 与实际喂给 Beta 的 `successes` | 只修数值饱和，不改奖励定义；补单测断言 `beta` 不触底 |
-| §2.3 residual | `core.py` 新增 `standardized_residual(feature, X, scaler)`，`gp()` / `pred()` / `calc()` 都改用与 GP 拟合**同一套 `StandardScaler`** 的标准ized 空间平方距离；阈值从散落各处的硬编码 10 收敛为 `gpevo/runtime.py` 的单一常量 **`RESIDUAL_CUT = 5.0`**，被 `core.py`、`gp_ml.py`、`gp_plot.py`、`ei_report.py`、`ei_select.py` 共同导入 | 按确认结果**直接标准化 + 改阈值**（5.0 ≈ 训练集内部最近邻标准化 d² 的 p99），**保留 EI 对 OOD 的硬剔除**，没做降权；optType 13 的适应度、gp.csv / density_predict.log / OUTPUT.txt 的 Residual 列数值都会变 |
+| §2.3 residual **（已撤销）** | 曾经把 `gp()` / `pred()` / `calc()` 的残差改成标准化空间距离、阈值改成 `RESIDUAL_CUT = 5.0`；2026-11-05 撤销，残差恢复 `sum((d-feature)²)` 原始空间距离，阈值恢复 **`RESIDUAL_CUT = 10.0`**。共享常量仍保留在 `gpevo/runtime.py`，`core.py` 的 `raw_residual()` 只额外产出 GP `predict()` 需要的标准化查询行 `X_` | 保留 EI 对 OOD 的硬剔除；optType 13 适应度、gp.csv / density_predict.log / OUTPUT.txt 的 Residual 列数值随之回到旧语义。撤销原因见 §2.3 末尾 |
 
 > 验证：`tests/` 全量 **154 passed**；`plot_gp_generation` 已用 ct22 风格数据端到端跑通。
 另外 `molecule_damage_check.md` 里那组结构合法性检查仍未落地，它比任何精度优化都更该先做。
@@ -130,13 +132,24 @@
 阈值 10 不是标度无关的，换体系、换 ReaxFF 参数化就失效。更矛盾的是：主动学习本该去标注分布外结构，
 而 `residual>10` 恰好把这类结构从 EI 里剔除。
 
-**已实施（§0.1）**：`core.standardized_residual()` 在标准化空间算距离，`gp()` / `pred()` /
-`calc()` 共用；阈值按实测重标定为 `RESIDUAL_CUT = 5.0`（data22 训练集内部最近邻标准化 d²
-的 p99 ≈ 5.0、dnmt ≈ 3.2），并集中到 `gpevo/runtime.py` 供 5 个模块导入。`gp_ml.py` 里
-6 处 `row[1] > 10` 与两处日志文案一并改为该常量。
+**撤销记录（2026-11-05）**：标准化残差在真实运行里改变了 OOD 判定与 Residual 列语义，
+按用户要求**全部回退**：
 
-**仍待定**：「OOD 一律不进 EI 降级为降权」这次**没做**（按确认结果保留硬剔除），
-以及马氏 / 核距离替代欧氏距离。若要降权，建议先把几代 `y ~ μ` 校准输出看完再定权重形式。
+- `core.py` 的 `standardized_residual()` 改为 `raw_residual(feature, d, scaler)`，
+  残差重新用 `sum((d - feature)²)`，即**原始（未标准化）10 维 ReaxFF 特征空间**；
+  函数仍产出 `X_ = scaler.transform(feature)`，但那只是 GP `predict()` 需要的标准化查询行，
+  与残差无关。
+- `gpevo/runtime.py` 的 `RESIDUAL_CUT` 从 `5.0` 改回 **`10.0`**；`core.py` 的 OOD 回退
+  （`res[imin] > RESIDUAL_CUT`）与 DFT 触发（`res[imin] < RESIDUAL_CUT`）**统一用 10**，
+  不再有 `< 5.0` 的硬编码。`gp_ml.py` / `gp_plot.py` / `ei_report.py` / `ei_select.py`
+  继续导入该共享常量，无需改动。
+- `gp()` / `pred()` / `calc()` 三处调用点同步改回原始残差；测试改为断言
+  `raw_residual` 等于朴素平方距离、且不再对列尺度不变。
+
+也就是说，本节开头写的「残差被能量列支配、阈值 10 不是标度无关」这个**问题重新存在**，
+属于已知且接受的状态：换体系 / 换 ReaxFF 参数化时阈值需重新标定。
+
+**仍待定**：「OOD 一律不进 EI 降级为降权」以及马氏 / 核距离替代欧氏距离，两者都未做。
 
 ### 2.4 RL bandit 的 reward 未归一化，Beta 后验会饱和
 
@@ -262,19 +275,19 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 | 1 | ~~§2.1 σ 口径、§2.2 两个 f_best 统一 + 校准诊断~~ **已做** | 数值 / 口径 | 会改变 EI 排序（已接受） |
 | 2 | ~~§2.5 可复现种子~~ **已做** | 实验方法 | 否（复用 MATLAB `fixRandSeed`） |
 | 3 | ~~§2.4 bandit reward 归一化 + 单测~~ **已做** | 正确性 | 否（RL 开启时） |
-| 4 | ~~§2.3 residual 标准化 + 阈值重标定~~ **已做** | 数值 / 口径 | 会改变 OOD 判定与 optType 13（已接受） |
+| 4 | ~~§2.3 residual 标准化 + 阈值重标定~~ **已撤销**（恢复原始残差 + 阈值 10） | 数值 / 口径 | 已回到旧行为 |
 | 5 | §3.2 每代最小标注量兜底 | 方法 | 会（但只影响「本该停摆」的代） |
 | 6 | §3.1 适应度 LCB、§3.4 多样性、§3.5 数据卫生 | 方法 | 会 |
 | 7 | q-EI / cEI（`ei_theoretical_basis.md` §6） | 方法 | 会 |
 
-**验证顺序**：1–4 已全部完成。现在可以用 `fixRandSeed` 固定随机流做配对 A/B，
+**验证顺序**：1–3 已实施、4 已撤销（见 §2.3）。现在可以用 `fixRandSeed` 固定随机流做配对 A/B，
 把 §2 的改动与 §3 的方法改动（适应度 LCB、多样性、cEI）分离评估。
 
 ---
 
 ## 5. 复核入口
 
-- `tests/` 当前 191 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
+- `tests/` 当前 192 passed（`python -m pytest -q tests`，用 anaconda python 且从仓库根跑）。
 - 全仓 `pytest` 会被 `dnmt/train/plot_gp_test.py`（未跟踪的数据目录）挡住收集，与代码无关。
 - `README.md` §「GP 主动学习」、`docs/ei_theoretical_basis.md` §6 是已有的理论基线，改动前先对齐口径。
 
@@ -375,7 +388,7 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 修复：按 `MtypeLIST[mi]-1` 取模板与参考键集（与 MATLAB `STDMOL(k)` 一致），
 `MtypeLIST` 缺失时回退按位置。真实弛豫几何验证：`ct22/results3/generation3`
 的 8/8 个 CL20 分子扭转成功（模板键集与弛豫几何键集均为 39，一致）。
-`tests/` 全量 191 passed。
+`tests/` 全量 192 passed。
 
 教训：多拷贝共晶里「分子位置」与「分子类型」不是同一个编号；任何按数组下标
 查 `STDMOL` / `molRefBonds` 的地方都要走 `MtypeLIST`。

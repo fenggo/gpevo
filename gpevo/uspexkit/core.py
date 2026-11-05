@@ -36,19 +36,19 @@ from irff.molecule import Molecules,enlarge, SuperCell,repulse,reassemble # molt
     High-Throughput Evolutionary Crystal Structure Prediction Method
 '''
 
-def standardized_residual(feature, X, scaler):
-    """Squared distance to every labelled row, in the STANDARDISED feature space.
+def raw_residual(feature, d, scaler):
+    """Squared distance to every labelled row, in the ORIGINAL feature space.
 
-    ``X`` is the already-standardised training matrix and ``scaler`` the fitted
-    StandardScaler.  Returns ``(res, imin, X_)``: per-row squared distances,
-    the nearest row index, and the (1, d) transformed query feature reused by
-    the GP prediction.  Raw feature columns have wildly different units (eV vs
-    g/cm3), so a raw Euclidean distance is >98% dominated by two energy columns
-    -- see docs/algorithm_review.md §2.3.  ``RESIDUAL_CUT`` is calibrated on
-    this standardised distance.
+    ``d`` is the raw training matrix (``data[:, 1:]``); the residual is
+    ``sum((d - feature)**2)`` with no scaling -- the §2.3 standardisation
+    experiment was reverted, so ``RESIDUAL_CUT`` (=10.0) again refers to this
+    raw distance.  Returns ``(res, imin, X_)`` where ``X_`` is the
+    StandardScaler-transformed query row kept only because the GP models are
+    fitted on standardised X; ``predict(X_)`` needs the same transform.
     """
-    X_ = scaler.transform(np.asarray(feature, dtype=float).reshape(1, -1))
-    res = np.sum(np.square(X - X_[0]), axis=1)
+    f = np.asarray(feature, dtype=float).reshape(1, -1)
+    X_ = scaler.transform(f)
+    res = np.sum(np.square(np.asarray(d, dtype=float) - f), axis=1)
     return res, int(np.argmin(res)), X_
 
 
@@ -228,8 +228,9 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
 
     scaler = preprocessing.StandardScaler().fit(X_raw)
     X      = scaler.transform(X_raw)
-    # Distance to the training manifold in the SAME space the GP is fitted in.
-    res, imin, X_ = standardized_residual(feature, X, scaler)
+    # Residual in the ORIGINAL feature space (§2.3 reverted); X_ is the
+    # standardised query row the GP predict() consumes.
+    res, imin, X_ = raw_residual(feature, d, scaler)
     ind    = np.where(res < tolerance)
 
     gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
@@ -247,7 +248,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     
     density_= mean_prediction[0] # data_[ind[0][im],-1]
     # if ((density_>np.max(y)*1.1 and (density_/density>1.5 or  density/density_>1.5)) or 
-    #     (density_>np.max(y) and res[imin]>10) ):
+    #     (density_>np.max(y) and res[imin]>RESIDUAL_CUT) ):
     if res[imin] > RESIDUAL_CUT:
        if density_rf[0]/density>1.5 or  density/density_rf[0]>1.5:
           density_ = density*d_scaler
@@ -280,7 +281,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
               if data_pred.shape[0]>pop:
                  U         = data_pred[:,6]
                  R         = data_pred[:,2]
-                 Density   = np.where(np.logical_and(U<0.2,R<10.0),data_pred[:,5],data_pred[:,4])
+                 Density   = np.where(np.logical_and(U<0.2,R<RESIDUAL_CUT),data_pred[:,5],data_pred[:,4])
                  imax      = np.argmax(Density)
                  # with open('gp.log','a') as fg:
                  #     print(data_pred.ndim,file=fg)
@@ -770,10 +771,10 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
             else:
                 feature = np.array([e[0],e[5],e[8],e[10],e[11],e[12],density])
 
-        # ``search_structure``'s raw distance is a structure-matching measure;
-        # the GP residual reported to gpevo is the standardised one (§2.3).
+        # ``search_structure``'s distance is a structure-matching measure; the
+        # residual reported to gpevo is the raw feature-space one (§2.3 reverted).
         ind, imin, _ = search_structure(feature, D, tolerance=tolerance)
-        res, imin, X_ = standardized_residual(feature, X, scaler)
+        res, imin, X_ = raw_residual(feature, D, scaler)
         res_ = float(res[imin])
 
         density_pred, std_den_pred = gpr_density.predict(X_, return_std=True)
@@ -887,12 +888,6 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
                 D = data[1:]
                 D_ = data_[1:]
             ind, imin, res_ = search_structure(feature, D, tolerance=tolerance)
-            # Console-only diagnostic: report the same standardised residual as
-            # gp()/pred(); the raw ``res_`` is a structure-matching distance.
-            _D = np.atleast_2d(D)
-            _sc = preprocessing.StandardScaler().fit(_D)
-            _res, _, _ = standardized_residual(feature, _sc.transform(_D), _sc)
-            res_ = float(np.min(_res))
         else:
             ind = [[]]
             with open("feature_mlp.csv", "w") as fd:

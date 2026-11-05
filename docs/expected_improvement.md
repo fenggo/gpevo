@@ -141,7 +141,7 @@ sign = -opt_sign if target == "eng_gp" else opt_sign
 1. **定维度 + fallback**（L553-559）：`optType=1` 但拿不到能量预测时，退回密度维度。
 2. **算 f_best**（L567-589）：观测优先，预测兜底。
 3. **den 门**（L599）：本代 GP 预测最高密度 `best_density < den` → 整代跳过。
-4. **逐晶体算 EI**（L604-615）：`residual > RESIDUAL_CUT`（=5.0，标准化空间）的跳过（外推区 μ/σ 不可信），
+4. **逐晶体算 EI**（L604-615）：`residual > RESIDUAL_CUT`（=10.0，原始特征空间）的跳过（外推区 μ/σ 不可信；§2.3 标准化已撤销），
    其余 `ei = EI(sign*mu, sigma, f_best)`。
 5. **排序选 top-K**（L619-638）：`mode=ei` 按 EI 降序、`uncertainty` 按 σ 降序、
    `random` 打乱。

@@ -8,7 +8,8 @@
 > 本文讲的是「凭什么信它、它的边界在哪」。
 >
 > 全仓审查发现的实现级口径问题（1.96σ 当 σ、incumbent 标度失配、residual 尺度）
-> 见 `docs/algorithm_review.md` §2.1–§2.3；**§2.1–§2.5 已全部实施**（§0.1），
+> 见 `docs/algorithm_review.md` §2.1–§2.3；**§2.1/§2.2/§2.4/§2.5 已实施、§2.3 已撤销**
+> （残差恢复原始特征空间距离、阈值恢复 10.0，见 §0.1 与 §2.3 撤销记录）。
 > `u` 门按确认结果保留 1.96σ 标度，未改采集目标本身，OOD 仍硬剔除。
 >
 > 行号以 `gpevo-codebuddy` 当前版本为准。
@@ -155,7 +156,7 @@ PI 要设 $\xi$），探索/利用自动平衡。
 |---|---|---|
 | $f_{\text{best}}$ 用**观测**值（`feature.csv` 的 DFT 真值）而非 GP 预测 | `gp_ml.py:515-527`、`590` | EI 定义里 incumbent 必须是**已完成观测**的最优值。用预测值会让所有 $Z$ 整体偏移，系统性偏向利用（把模型噪声当真值） |
 | optType 1 在 $-E_{gp}$ 上做最大化（`sign`） | `gp_ml.py:499-501`、`581-582` | $\min\mathrm{EI}(f)=\max\mathrm{EI}(-f)$，公式可统一 |
-| `residual > RESIDUAL_CUT (5.0)` 先过滤 | `gp_ml.py` | 代理本身不可信的候选不进采集，类似 trust-region / 数据质量门；§2.3 后阈值统一由 `gpevo/runtime.py` 提供，residual 本身是标准化特征空间的距离 |
+| `residual > 10` 先过滤 | `gp_ml.py` | 代理本身不可信的候选不进采集，类似 trust-region / 数据质量门；阈值由 `gpevo/runtime.py` 的 `RESIDUAL_CUT = 10.0` 统一提供，residual 是**原始（未标准化）10 维 ReaxFF 特征空间**的平方距离（§2.3 标准化已撤销） |
 
 ---
 

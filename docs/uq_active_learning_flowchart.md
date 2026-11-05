@@ -14,7 +14,7 @@ flowchart TD
         E --> F["扫描所有 valid 晶体<br/>fitness < 100000"]
         F --> G["遍历每个 valid 晶体<br/>从 gp.csv 查找其 GP 预测"]
 
-        G --> H{"残差 (residual, 标准化空间)<br/> > RESIDUAL_CUT (5.0) ?"}
+        G --> H{"残差 (residual, 原始空间)<br/> > RESIDUAL_CUT (10.0) ?"}
         H -->|"是"| I["⛔ 跳过 (GP 预测不可靠)"]
         H -->|"否"| J["计算 UCB 分数<br/>UCB = density_gp + 2.0 × σ"]
 
@@ -70,7 +70,7 @@ else:
 ### 残差过滤
 
 ```
-if residual > RESIDUAL_CUT:   # 5.0, 标准化特征空间
+if residual > RESIDUAL_CUT:   # 10.0, 原始 10 维 ReaxFF 特征空间
     → 该晶体不参与 UCB 竞争 (GP 预测质量太差)
 ```
 

@@ -1053,7 +1053,8 @@ def _gp_active_learning(ORG, POP, fitness):
                   f"dropped {len(dropped)} cached model(s)")
 
     if not pred_ids:
-        console_print("  No valid crystals with residual <= 10, skipping pred")
+        console_print(f"  No valid crystals with residual <= {RESIDUAL_CUT:g}, "
+                      f"skipping pred")
         return fitness
 
     # uspexkit.pred appends to results1/density_predict.log and does not
