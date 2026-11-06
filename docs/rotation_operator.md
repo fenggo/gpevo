@@ -333,3 +333,5 @@ list / 非 contiguous 输入、刚体运动距离守恒、扩展缺失兜底。
   以及 `intramol_bonds`、共用数值 kernel 的两次 Cython 加速。
 - [`strain_matrix.md`](strain_matrix.md)：旋转等算子完成后 `mol.ZMATRIX` 的
   刷新与 `Parents.strainMatrix` 的来历。
+- [`swarm_operator.md`](swarm_operator.md)：另一个分子刚体算子（swarm）的原理，
+  及其与 rotmutation 在作用单位 / 取向处理上的差别。
