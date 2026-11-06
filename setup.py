@@ -1,9 +1,9 @@
 """Build script for GPEvo's Cython extensions.
 
 Metadata (name, version, dependencies, package data) lives in pyproject.toml;
-this file compiles the two ACTIVE extensions (random_cell_mol_cy and
-molcheck_cy).  Neither needs numpy headers: they use the buffer protocol via
-typed memoryviews.
+this file compiles the four ACTIVE extensions (random_cell_mol_cy,
+molcheck_cy, bondtable_cy and rotation_kernels_cy).  None needs numpy headers:
+they use the buffer protocol via typed memoryviews.
 
 FunctionFolder/sys/uspex_fast_core.pyx is deliberately NOT built here.  It is
 a dormant Octave-era fingerprint accelerator: gpevo computes its own
@@ -43,6 +43,16 @@ extensions = [
         "gpevo.FunctionFolder.sys.molcheck_cy",
         "gpevo/FunctionFolder/sys/molcheck_cy.pyx",
         "gpevo/FunctionFolder/sys/molcheck_cy.c",
+    ),
+    _ext(
+        "gpevo.FunctionFolder.sys.bondtable_cy",
+        "gpevo/FunctionFolder/sys/bondtable_cy.pyx",
+        "gpevo/FunctionFolder/sys/bondtable_cy.c",
+    ),
+    _ext(
+        "gpevo.FunctionFolder.sys.rotation_kernels_cy",
+        "gpevo/FunctionFolder/sys/rotation_kernels_cy.pyx",
+        "gpevo/FunctionFolder/sys/rotation_kernels_cy.c",
     ),
 ]
 extensions = [e for e in extensions if e is not None]

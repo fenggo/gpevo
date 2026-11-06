@@ -1,11 +1,25 @@
-"""Python equivalent of NEW_coord2Zmatrix.m."""
+"""Python equivalent of NEW_coord2Zmatrix.m.
+
+The per-atom scalar loop is compiled in ``sys/rotation_kernels_cy.pyx``.  The
+original numpy routine is kept below as ``_python_coord2zmatrix`` (reference
+oracle + fallback when the extension is not built); the parity tests in
+``tests/test_rotation_kernels_cy.py`` assert the two agree bit-for-bit.
+"""
 from __future__ import annotations
 
 import math
+
 import numpy as np
 
+try:
+    from gpevo.FunctionFolder.sys.rotation_kernels_cy import (
+        coord2zmatrix as _cython_coord2zmatrix,
+    )
+except Exception:                       # extension not built / incompatible
+    _cython_coord2zmatrix = None
 
-def NEW_coord2Zmatrix(coords, fmt):
+
+def _python_coord2zmatrix(coords, fmt):
     coords = np.asarray(coords, dtype=float).copy()
     n = coords.shape[0]
     if n == 1:
@@ -49,6 +63,23 @@ def NEW_coord2Zmatrix(coords, fmt):
         if abs(tors + math.pi) < 0.0001:
             z[ind, 2] = math.pi
     return z
+
+
+def NEW_coord2Zmatrix(coords, fmt):
+    """Cartesian coordinates -> Z-matrix (bonds / angles / torsions).
+
+    ``fmt`` holds 1-based reference-atom indices; it is cast to int32 for the
+    Cython memoryview.  Falls back to the pure-numpy oracle when the compiled
+    kernel is unavailable.
+    """
+    coords = np.asarray(coords, dtype=float)
+    if coords.shape[0] == 1:
+        return coords.copy()
+    fmt_i = np.ascontiguousarray(fmt, dtype=np.intc)
+    if _cython_coord2zmatrix is not None:
+        return _cython_coord2zmatrix(
+            np.ascontiguousarray(coords, dtype=float), fmt_i)
+    return _python_coord2zmatrix(coords.copy(), np.asarray(fmt_i, dtype=int))
 
 
 def _rot_mat(angle, axis):

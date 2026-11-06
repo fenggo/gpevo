@@ -9,6 +9,8 @@ dist/
 *.so
 gpevo/FunctionFolder/spacegroup/random_cell_mol_cy.c
 gpevo/FunctionFolder/sys/molcheck_cy.c
+gpevo/FunctionFolder/sys/bondtable_cy.c
+gpevo/FunctionFolder/sys/rotation_kernels_cy.c
 
 # 运行/训练产物
 *.pkl

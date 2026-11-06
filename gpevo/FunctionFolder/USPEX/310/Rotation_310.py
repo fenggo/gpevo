@@ -27,7 +27,9 @@ from gpevo.FunctionFolder.USPEX.src.variation_common import (
 )
 from gpevo.FunctionFolder.USPEX.src.Rotate_rigid_body import Rotate_rigid_body
 from gpevo.FunctionFolder.USPEX.src.PrincipleAxis import PrincipleAxis
-from gpevo.FunctionFolder.sys.mol_bond_table import intramol_bonds
+from gpevo.FunctionFolder.sys.mol_bond_table import (
+    intramol_bonds, radii_for, bonds_from_radii,
+)
 from gpevo.log_utils import console_print
 
 
@@ -49,9 +51,9 @@ def group_rotation_counts():
     return _group_rot_gen, _group_rot_total
 
 
-def _bond_graph(coords, type_idxs):
+def _bond_graph(coords, radii):
     """Adjacency list of a molecule from its intramolecular bonds."""
-    bonds = intramol_bonds(coords, type_idxs)
+    bonds = bonds_from_radii(coords, radii)
     n = coords.shape[0]
     adj = [set() for _ in range(n)]
     for i, j in bonds:
@@ -72,12 +74,17 @@ def _twist_dihedrals(coords, flex, type_idxs, ref_bonds, max_iter=200):
     n = coords.shape[0]
     if n < 4 or not flex:
         return coords, False
-    ref = set(tuple(sorted(p)) for p in (ref_bonds or intramol_bonds(coords, type_idxs)))
+    # Covalent radii depend only on the atom types, which do not change
+    # across the twist search -- resolve them once instead of on every one of
+    # the (up to max_iter * len(flex)) candidate geometries.
+    radii = radii_for(type_idxs[:n])
+    ref = set(tuple(sorted(p)) for p in (ref_bonds
+                                         or bonds_from_radii(coords, radii)))
     any_moved = False
     for i1, i2, outer in flex:
         if not (0 <= i1 < n and 0 <= i2 < n and 0 <= outer < n):
             continue
-        adj = _bond_graph(coords, type_idxs)
+        adj = _bond_graph(coords, radii)
         adj[i1].discard(i2)
         adj[i2].discard(i1)
         comp = set()
@@ -106,7 +113,7 @@ def _twist_dihedrals(coords, flex, type_idxs, ref_bonds, max_iter=200):
             cand[comp_idx] = Rotate_rigid_body(
                 coords[i1], axis, cand[comp_idx], angle
             )
-            if set(tuple(sorted(p)) for p in intramol_bonds(cand, type_idxs)) == ref:
+            if set(tuple(sorted(p)) for p in bonds_from_radii(cand, radii)) == ref:
                 coords = cand
                 moved = True
                 break
@@ -151,6 +158,10 @@ def Rotation_310(count):
         # same lookup in variation_common.py).
         mtype_list = list(getattr(child, "MtypeLIST", None) or [])
         group_rotated = False
+        # Geometry after rigid rotation + translation, before any twist.  Kept
+        # so a full-cell clash caused by a twisted group can fall back to plain
+        # rigid rotation instead of discarding the offspring (see below).
+        rigid_geometry = []
         for mi, mol in enumerate(child.MOLECULES):
             coords = np.asarray(mol.MOLCOORS, dtype=float)
             center = np.mean(coords, axis=0)
@@ -165,6 +176,7 @@ def Rotation_310(count):
                 angle = (np.random.rand() - 0.5) * 2 * angle_max * ref / b[loop]
                 coords = Rotate_rigid_body(center, a[:, loop], coords, angle)
             coords = coords + (np.random.rand(3) - 0.5) * 2 * trans_max
+            rigid_geometry.append((mol, coords.copy(), np.mean(coords, axis=0)))
             # --- flexible intramolecular dihedral twist (flex_dihedral) ---
             # STDMOL / molRefBonds are indexed by molecule TYPE (1-based), not
             # by the molecule's position in the cell: a cell can hold several
@@ -193,7 +205,19 @@ def Rotation_310(count):
                         group_rotated = True
             mol.MOLCOORS = coords
             mol.MOLCENTER = np.mean(coords, axis=0)
-        if not valid_molecules(child, -0.2):
+        valid = valid_molecules(child, -0.2)
+        if not valid and group_rotated:
+            # A twisted group passed the intramolecular bond-set test but
+            # collided in the full-cell check (the reason enabling group
+            # rotation made ~72% of attempts fall back to Random on ct22).
+            # Undo every twist and keep the already-computed rigid rotation;
+            # this is the operator-level fallback MATLAB does per molecule.
+            for mol, rc, rcen in rigid_geometry:
+                mol.MOLCOORS = rc
+                mol.MOLCENTER = rcen
+            group_rotated = False
+            valid = valid_molecules(child, -0.2)
+        if not valid:
             continue
         recompute_zmatrix(child)
         finalize_offspring(child, "Rotation")

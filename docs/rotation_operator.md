@@ -131,11 +131,205 @@ rb   = ref_bonds[tidx]                # 参考键集也按类型
 
 ---
 
+## 6. 打开基团旋转后的高失败率与算子级回退（2026-11-06）
+
+### 现象
+
+`ct22/results3` 打开 `flex_dihedral` 后，旋转算子大量打印
+`failed to do Rotation, switch to Random`。用真实弛豫几何（`generation3`）
+做受控对照，60 次 `Rotation_310` 调用：
+
+| | 回退 Random | 带基团旋转的子代 |
+|---|---|---|
+| `flex_dihedral` 关闭 | 2/60（3%） | 0/60 |
+| `flex_dihedral` 打开（修复前） | 43/60（**72%**） | 17/60 |
+| `flex_dihedral` 打开（修复后） | **0/60（0%）** | 6/60 |
+
+### 根因：两级判据不一致
+
+`Rotation_310` 每个 attempt 先对所有分子做完「呼吸晶格 + 主轴刚体旋转 +
+平移 + 基团扭转」，最后才做一次整胞 `valid_molecules(child, -0.2)`；
+失败就丢弃整个子代，50 次全败则 `Random_310`。
+
+而这两级检查用的是**不同的阈值**：
+
+- `_twist_dihedrals` 的接受判据是 `intramol_bonds(cand) == ref`，即分子内
+  **成键集合**不变，用的是共价半径阈值 `1.2*(r_i+r_j)`（C/N/O 约 1.64–1.82 Å）；
+- 最终的 `valid_molecules` 走 `newMolCheck`，检查**分子间**最小距离
+  `minDistMatrice - 0.2`（ct22 实测 1.55–1.70 Å）和分子内周期镜像。
+
+一个转开的硝基完全可能「键集合没变」却插进相邻分子 → 扭转自认为成功，
+整胞检查把它判死，于是整个子代被丢弃。
+
+### 已有的回退和缺少的回退
+
+- **分子级已有**：`_twist_dihedrals` 里某个 flex 在 `max_iter`（默认 200）
+  内找不到合法角度时，`coords = original`，该分子只保留刚体旋转+平移
+  （`Rotation_310.py` 的 `if not moved` 分支，与 MATLAB
+  `SmartRotInertia` 的 `if ~goodRot` 对应）。
+- **算子级没有**：一旦扭转成功但整胞 `newMolCheck` 失败，没有任何降级，
+  直接 `continue` 重试；50 次全败 → `Random_310`（完全不同的随机结构）。
+
+### 试过但不采用的做法
+
+最初按「每个候选二面角立刻验分子间距离」实现（`clash_check`）：实测
+**单个子代 40.9 秒**、碰撞拒绝率 65%，12 分钟跑不完 10 个子代。两个原因：
+每个角度都要跑整胞 `newMolCheck` + 纯 Python `intramol_bonds`，200 角度
+× 6 flex × 4 分子 × 50 attempt 直接爆炸；且该检查发生在分子循环**中途**，
+其余分子尚未刚体旋转/平移，验的是半成品晶胞，语义本身就不对。该实现已回退。
+
+### 采用的修复：子代定稿后验证 + 回退到刚体旋转
+
+在 `Rotation_310.py` 的分子循环里，把「刚体旋转+平移后、扭转前」的
+`(mol, MOLCOORS, MOLCENTER)` 存进 `rigid_geometry`；全部处理完后：
+
+1. 先 `valid_molecules(child, -0.2)` 验一次；
+2. 若失败且本轮 `group_rotated` 为真 → 把所有分子恢复到 `rigid_geometry`、
+   `group_rotated = False`，再验一次；
+3. 两次都失败才 `continue`（并最终回退 `Random_310`）。
+
+每次 attempt 最多 2 次整胞检查（Cython `newMolCheck`，~1ms），查的是
+**完整晶胞**；效果：回退 Random 72% → 0%，同时仍保留 6/60 的真实基团旋转
+子代（那些恰好不撞的）。回退产生的子代是纯刚体旋转，不带
+`[group rotation]` 标记，也不计入 `group rotation` 汇总计数——这是正确的，
+它本来就没有基团旋转。
+
+回归测试：`tests/test_rotation_310.py` 的
+`test_rigid_rotation_fallback_when_twisted_cell_is_invalid`、
+`test_no_fallback_when_twisted_cell_is_valid`、
+`test_fallback_still_fails_retries_then_uses_random`。
+
+> 与 MATLAB 对拍：MATLAB 的 `Rotation_310.m` 只有分子级
+> `if ~goodRot` 回退，算子级仍是 50 次全败 → `Random_310`。这里新增的
+> 第 2 次整胞检查是**gpevo 独有的行为改进**，会改变启用 `flex_dihedral`
+> 时的子代来源（原本回退 Random 的那部分现在变成合法 rotmutation）。
+> 关闭 `flex_dihedral` 时行为完全不变。
+
+---
+
+## 7. intramol_bonds 的向量化 / Cython 加速（2026-11-06）
+
+### 热点
+
+`sys/mol_bond_table.py` 的 `intramol_bonds` 原本是 O(n²) 双层 Python 循环，
+每个原子对调用一次 `np.linalg.norm` 和两次 `_rcov()`（后者含 `G["ORG_STRUC"]`
+查找 + `covalentRadius()` dict 查找）。36 原子分子单次 ~1.3–5 ms。真正的放大
+点在 `Rotation_310._twist_dihedrals`：每个候选二面角都要重算一次键集合
+（`intramol_bonds(cand, type_idxs)`，`Rotation_310.py:109`），而 `type_idxs`
+在整个搜索里不变——半径被重复查询几十万次。
+
+### 做法（Cython 主路径 + 向量化兜底）
+
+- 新增 `sys/bondtable_cy.pyx`：typed memoryviews + `libc.math.sqrt` 的双层 C
+  循环，返回 `(i,j)` 列表；接进 `setup.py`（第三个 ACTIVE 扩展，与
+  `molcheck_cy` 同一套 `cythonize` 指令），生成的 `.c`/`.so` 加进
+  `.gitignore`，`.pyx` 加进 `pyproject.toml` package-data。
+- `mol_bond_table.py` 拆成三层：`_reference_bonds`（原始双循环，作 parity
+  oracle）、`_vectorized_bonds`（numpy 广播，未编译时的兜底）、Cython 主路径；
+  公共 `intramol_bonds(coords, type_idxs)` 签名与逐位语义不变。
+- 新增 `radii_for(type_idxs)` / `bonds_from_radii(coords, radii)`，让
+  `_twist_dihedrals` 在入口**预算一次半径数组**，后续所有候选角度复用；
+  `_bond_graph` 也改为接收 radii。
+
+### 实测（同轮可比，36 原子）
+
+| 路径 | 耗时 | 加速 |
+|---|---|---|
+| 原始双循环 | 1.319 ms | 1× |
+| 向量化（兜底） | 0.047 ms | 28× |
+| `intramol_bonds` 公共入口（Cython） | 0.014 ms | 93× |
+| `bonds_from_radii`（预算半径，扭转搜索实际用） | 0.004 ms | **347×** |
+
+端到端（`ct22/results3` 真实弛豫几何，40 次 `Rotation_310`，固定种子）：
+**mean 0.701 s → 0.069 s（10×）**，max 3.825 s → 0.185 s；上一节加的
+算子级回退仍生效，回退 Random 0/40。
+
+### 语义与对拍
+
+- 判据仍是 `sqrt(dx²+dy²+dz²) < BOND_SCALE*(r_i+r_j)`，严格 `<`；
+- `_rcov` 的越界 / `type_idx=0` 负索引回绕等既有语义全部保留（三条路径
+  共用同一个 `radii_for`）；
+- `tests/test_bondtable_cy.py` 用 30 组随机分子 + 20 组近阈值几何断言
+  Cython / 向量化 / 原始双循环三者逐位一致，另覆盖空分子、非法 type、
+  扩展缺失时的兜底。`tests/` 全量 251 passed。
+
+> 部署：`~/ct22` 那类运行目录用的是 site-packages 非 editable 旧副本，
+> 要吃到新内核仍需 `pip install -e .`；未编译 `.so` 时自动回退向量化版，
+> 行为不变只是慢 `~6×`（相对 Cython 路径）。
+
+---
+
+## 8. 共用数值 kernel 的 Cython 化：NEW_coord2Zmatrix / Rotate_rigid_body（2026-11-06）
+
+### 为什么不是编译 Rotation_310.py 本身
+
+对真实 `ct22/results3` 数据做 cProfile（20 次 `Rotation_310`，累计 2.694 s）：
+
+| 函数 | cumtime | 占比 |
+|---|---|---|
+| `_twist_dihedrals` | 0.909 s | 34% |
+| `recompute_zmatrix` → `NEW_coord2Zmatrix` | 0.556 s | 21% |
+| `Rotate_rigid_body`（6456 次） | 0.316 s | 12% |
+| `copy_individual`（deepcopy） | 0.271 s | 10% |
+| `valid_molecules` → `newMolCheck` | 0.254 s | 9%（已 Cython） |
+| `PrincipleAxis` | 0.201 s | 7% |
+| **`Rotation_310` 自身 tottime** | **0.103 s** | **4%** |
+
+`Rotation_310.py` 自身只是调度逻辑，单独编成 Cython 几乎没收益。时间都在
+它调用的**共用数值 kernel** 里。
+
+### 做法
+
+新增 `sys/rotation_kernels_cy.pyx`，两个 kernel（typed memoryviews + `nogil`
+纯 C 循环，输出数组由 Python 侧分配，不需要 numpy 头文件）：
+
+- `coord2zmatrix` 复刻 `NEW_coord2Zmatrix` 的逐原子标量循环：1-based
+  `fmt` 索引钳到 atom 0、`ind==2` 的固定 `v3=(0,0,-1)`、acos 前的
+  `[-1,1]` clip、`1e-12` 退化分母保护、`|tors+pi|<1e-4 → pi` 特例。
+- `rotate` 复刻 Rodrigues 矩阵，注意是**行向量** `r @ M`（`@` 右侧矩阵，
+  即列向量形式的转置）；零长度轴按 `n=1.0` 归一。
+
+`NEW_coord2Zmatrix.py` / `Rotate_rigid_body.py` 保留原纯 numpy 实现作
+`_python_coord2zmatrix` / `_python_rotate` 参考 oracle 与未编译时兜底；
+公共入口签名不变，`fmt` 转成 `int32`、坐标转成 contiguous 再调 Cython。
+`NEW_ZMATRIXCOORD` 等其余函数未动。接进 `setup.py`（第四个 ACTIVE 扩展）、
+`.gitignore`、`pyproject.toml`。
+
+两个函数都是跨算子共用：`NEW_coord2Zmatrix` 被 8 处调用
+（`read_molecules.py`、`readMOL.py`、`GetOrientation.py`、
+`Heredity_310.py`、`Mutation_310.py`、`SoftModeMutation_310.py`、
+`variation_common.py` 等），`Rotate_rigid_body` 被
+`GetOrientation.py` / `SwarmMutation_310.py` / `Rotation_310.py` 调用——
+所以这轮收益**对所有 7 个算子都成立**，不止旋转。
+
+### 实测（真实 CL20 36 原子几何）
+
+| kernel | 纯 Python | Cython | 加速 | parity |
+|---|---|---|---|---|
+| `NEW_coord2Zmatrix` | 4.42 ms | 0.0085 ms | **523×** | 4.4e-16 |
+| `Rotate_rigid_body` | 0.031 ms | 0.0053 ms | 5.8× | 1.8e-15 |
+
+端到端（`ct22/results3`，40 次 `Rotation_310`，固定种子）：
+**mean 0.069 → 0.044 s（再快 1.6×）**，max 0.185 → 0.131 s；回退 Random
+仍 0/40。累计相对 §6 之前（0.701 s）快 **16×**。
+
+`tests/test_rotation_kernels_cy.py` 的 55 个用例断言两条路径逐位一致，
+覆盖随机分子、单/双原子、共线退化分母、`fmt` 含 0 钳位、零长度轴、
+list / 非 contiguous 输入、刚体运动距离守恒、扩展缺失兜底。
+`tests/` 全量 306 passed。
+
+> 部署与前面几轮一致：`~/ct22` 那类运行目录用的是 site-packages 非 editable
+> 旧副本，要吃到新 kernel 仍需 `pip install -e .`；未编译 `.so` 时自动
+> 回退纯 numpy oracle，行为不变只是慢。
+
+---
+
 ## 姊妹篇
 
 - [`rl_bandit_tutorial.md`](rl_bandit_tutorial.md)：把 `rotationAngleMax` /
   `fracRotMut` 作为 RL 臂做单参数消融与 INPUT.txt 配置。
-- [`algorithm_review.md`](algorithm_review.md) §7：全仓审查里记录的
-  这次索引 bug 与修复（group rotation 占比恒 0 的根因）。
+- [`algorithm_review.md`](algorithm_review.md) §7 / §8 / §9 / §10：全仓审查里
+  记录的索引 bug（group rotation 占比恒 0）、72% 回退 Random 的修复，
+  以及 `intramol_bonds`、共用数值 kernel 的两次 Cython 加速。
 - [`strain_matrix.md`](strain_matrix.md)：旋转等算子完成后 `mol.ZMATRIX` 的
   刷新与 `Parents.strainMatrix` 的来历。

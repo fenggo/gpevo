@@ -1,8 +1,11 @@
+import contextlib
 import importlib
+import io
+
 import numpy as np
 
 from gpevo.runtime import G, AttrDict
-from gpevo.FunctionFolder.sys.mol_bond_table import intramol_bonds
+from gpevo.FunctionFolder.sys.mol_bond_table import intramol_bonds, radii_for
 
 _rot = importlib.import_module("gpevo.FunctionFolder.USPEX.310.Rotation_310")
 _twist_dihedrals = _rot._twist_dihedrals
@@ -18,7 +21,7 @@ def test_bond_graph_matches_intramol_bonds():
     _setup_atom_types()
     coords = np.array([[0, 0, 0], [1.5, 0, 0], [3.0, 0, 0], [4.5, 0, 0]], dtype=float)
     types = [1, 1, 1, 1]
-    adj = _bond_graph(coords, types)
+    adj = _bond_graph(coords, radii_for(types))
     bonds = set(tuple(sorted(p)) for p in intramol_bonds(coords, types))
     edges = set()
     for i, nbrs in enumerate(adj):
@@ -167,3 +170,89 @@ def test_type_lookup_does_not_apply_wrong_template(monkeypatch):
     # group_rotated came from the two type-2 molecules, not from a wrong
     # template applied to a type-1 one.
     assert _rot._group_rot_gen == 1
+
+
+def _install_twist_offspring(monkeypatch, flex=((1, 2, 3),)):
+    """Common setup: a 4-atom type-2 molecule whose twist succeeds."""
+    child, t1, t2 = _two_type_offspring()
+    t1_std = AttrDict(types=[1, 1], flex_dihedral=[],
+                      format=np.zeros((2, 3), dtype=int))
+    t2_std = AttrDict(types=[1, 1, 1, 1], flex_dihedral=list(flex),
+                      format=np.zeros((4, 3), dtype=int))
+    org = AttrDict(
+        atomType=[6], STDMOL=[t1_std, t2_std],
+        molRefBonds=[intramol_bonds(t1, [1, 1]),
+                     intramol_bonds(t2, [1, 1, 1, 1])],
+        rotationAngleMax=np.pi / 2, translationMax=0.0, maxDihedralIter=200,
+    )
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", AttrDict(POPULATION=[AttrDict()]))
+    monkeypatch.setitem(G, "OFF_STRUC", AttrDict(POPULATION=[]))
+    monkeypatch.setattr(_rot, "pick_parent", lambda: 0)
+    monkeypatch.setattr(_rot, "copy_individual",
+                        lambda ind: _two_type_offspring()[0])
+    monkeypatch.setattr(_rot, "recompute_zmatrix", lambda *a, **k: None)
+    monkeypatch.setattr(_rot, "finalize_offspring", lambda *a, **k: None)
+    monkeypatch.setattr(_rot, "_group_rot_gen", 0)
+    monkeypatch.setattr(_rot, "_group_rot_total", 0)
+    return org
+
+
+def test_rigid_rotation_fallback_when_twisted_cell_is_invalid(monkeypatch, capsys):
+    """A twisted group that collides falls back to rigid rotation, not Random.
+
+    This is the operator-level fallback: valid_molecules is called twice (once
+    on the twisted child, once after undoing the twists) and the offspring is
+    still a rotmutation, with no [group rotation] tag.
+    """
+    _install_twist_offspring(monkeypatch)
+    calls = {"n": 0, "coords": []}
+
+    def fake_valid(ind, adj):
+        calls["n"] += 1
+        # snapshot a type-2 molecule's geometry so we can see the fallback
+        calls["coords"].append(np.asarray(ind.MOLECULES[2].MOLCOORS).copy())
+        return 0 if calls["n"] == 1 else 1   # clash, then rigid-only ok
+
+    monkeypatch.setattr(_rot, "valid_molecules", fake_valid)
+    _rot.Rotation_310(1)
+
+    assert calls["n"] == 2, "expected one failed check + one after fallback"
+    # The fallback restored the rigid-rotation geometry (coords changed).
+    assert not np.allclose(calls["coords"][0], calls["coords"][1])
+    assert _rot._group_rot_gen == 0, "fallback offspring is not group-rotated"
+    assert "[group rotation]" not in capsys.readouterr().out
+    assert len(G["OFF_STRUC"].POPULATION) == 1, "no Random replacement"
+
+
+def test_no_fallback_when_twisted_cell_is_valid(monkeypatch, capsys):
+    """When the twisted child passes, no fallback and the tag is kept."""
+    _install_twist_offspring(monkeypatch)
+    calls = {"n": 0}
+
+    def fake_valid(ind, adj):
+        calls["n"] += 1
+        return 1
+
+    monkeypatch.setattr(_rot, "valid_molecules", fake_valid)
+    _rot.Rotation_310(1)
+
+    assert calls["n"] == 1, "no second check when the first passes"
+    assert _rot._group_rot_gen == 1
+    assert "[group rotation]" in capsys.readouterr().out
+
+
+def test_fallback_still_fails_retries_then_uses_random(monkeypatch):
+    """If rigid-only is also invalid, the attempt is retried (not accepted)."""
+    _install_twist_offspring(monkeypatch)
+    monkeypatch.setattr(_rot, "valid_molecules", lambda *a, **k: 0)
+    # Stub the Random fallback so the test does not need a CalcFoldTemp dir.
+    rnd = {"n": 0}
+    monkeypatch.setattr(
+        __import__("importlib").import_module(
+            "gpevo.FunctionFolder.USPEX.310.Random_310"),
+        "Random_310", lambda count: rnd.__setitem__("n", rnd["n"] + 1))
+    with contextlib.redirect_stdout(io.StringIO()):
+        _rot.Rotation_310(1)
+    assert rnd["n"] == 1
+    assert len(G["OFF_STRUC"].POPULATION) == 0

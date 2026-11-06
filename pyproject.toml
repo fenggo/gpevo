@@ -45,6 +45,8 @@ gpevo = [
     "FunctionFolder/spacegroup/data/*.txt",
     "FunctionFolder/sys/uspex_fast_core.pyx",  # dormant, NOT built (see setup.py)
     "FunctionFolder/sys/molcheck_cy.pyx",
+    "FunctionFolder/sys/bondtable_cy.pyx",
+    "FunctionFolder/sys/rotation_kernels_cy.pyx",
     "FunctionFolder/sys/*.so",
     # vendored uspexkit subset (gp/pred/calc/add)
     "uspexkit/LICENSE",
