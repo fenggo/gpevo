@@ -17,6 +17,13 @@ Compared with a textbook PSO there is no velocity/momentum term: individuals
 do not carry one, and adding it would mean new per-structure state that has
 to survive pickling.  The random step U(0, swarmStep) supplies the stochastic
 part instead.
+
+``g`` lives in the best structure's cell, which need not match the child's
+(heredity / latmutation mix cells).  ``_min_image`` therefore maps ``g`` into
+the child's reference frame via fractional coordinates before folding the
+displacement; otherwise the two cells are mixed (docs/swarm_operator.md 5.2 B).
+Positional pairing of molecules is guarded by a ``MtypeLIST`` assertion so a
+reordered molecule list can never silently cross molecule types (5.2 A).
 """
 from __future__ import annotations
 
@@ -31,15 +38,37 @@ from gpevo.FunctionFolder.USPEX.src.Rotate_rigid_body import Rotate_rigid_body
 from gpevo.log_utils import console_print
 
 
-def _min_image(delta, lattice):
-    """Fold one Cartesian displacement into its minimum-image form."""
+def _min_image(target, center, lattice, target_lattice=None):
+    """Minimum-image displacement from ``center`` to ``target`` in ``lattice``'s frame.
+
+    ``center`` is a Cartesian point in the child's cell (``lattice``);
+    ``target`` is the matching point of the guiding ``best`` structure.
+    When ``target_lattice`` is given, ``target`` is first expressed as
+    fractional coordinates in that cell and mapped back into ``lattice``, so
+    both endpoints share ONE reference frame.  Without it the displacement
+    mixes the best and child cells (docs/swarm_operator.md 5.2 B) and can even
+    reverse direction: a best molecule at fraction 0.8 of a=10 sits at 8 A,
+    which folded with the a=12 child cell reads as +6 A instead of the
+    correct -4.4 A toward 0.8*12 = 9.6 A.
+
+    ``target_lattice=None`` keeps the legacy single-frame behaviour, i.e.
+    ``target`` is already expressed in ``lattice``'s Cartesian frame.
+    """
     cell = np.asarray(lattice, dtype=float).reshape(3, 3)
+    tgt = np.asarray(target, dtype=float)
+    ctr = np.asarray(center, dtype=float)
     try:
         inverse = np.linalg.inv(cell)
     except np.linalg.LinAlgError:
-        return np.asarray(delta, dtype=float)
-    frac = np.asarray(delta, dtype=float) @ inverse
-    frac = frac - np.round(frac)
+        return tgt - ctr
+    if target_lattice is not None:
+        source = np.asarray(target_lattice, dtype=float).reshape(3, 3)
+        try:
+            tgt = (tgt @ np.linalg.inv(source)) @ cell
+        except np.linalg.LinAlgError:
+            pass                      # singular source cell: keep Cartesian tgt
+    frac = (tgt - ctr) @ inverse
+    frac = frac - np.round(frac)      # half-even, matches newMolCheck
     return frac @ cell
 
 
@@ -64,6 +93,7 @@ def SwarmMutation_310(count):
         _im("gpevo.FunctionFolder.USPEX.310.Random_310").Random_310(count)
         return
     best = POP.POPULATION[ranking[0]]
+    best_lattice = np.asarray(best.LATTICE, dtype=float)
 
     for attempt in range(1, 51):
         idx = pick_parent()
@@ -72,13 +102,21 @@ def SwarmMutation_310(count):
         child = copy_individual(POP.POPULATION[idx])
         if len(child.MOLECULES) != len(best.MOLECULES):
             break                       # different composition -> no mapping
+        child_list = getattr(child, "MtypeLIST", None)
+        best_list = getattr(best, "MtypeLIST", None)
+        child_types = tuple(int(t) for t in child_list) if child_list is not None else ()
+        best_types = tuple(int(t) for t in best_list) if best_list is not None else ()
+        assert child_types == best_types, (
+            "SwarmMutation_310: parent and best MtypeLIST differ "
+            f"({child_types} vs {best_types}); positional pairing would "
+            "cross molecule types")
 
         lattice = np.asarray(child.LATTICE, dtype=float)
         targets = _centers(best)
         for position, mol in enumerate(child.MOLECULES):
             coords = np.asarray(mol.MOLCOORS, dtype=float)
             center = coords.mean(axis=0)
-            delta = _min_image(targets[position] - center, lattice)
+            delta = _min_image(targets[position], center, lattice, best_lattice)
             new_center = center + (step * np.random.rand()) * delta
 
             coords = coords + (new_center - center)          # rigid translation
