@@ -146,6 +146,85 @@ def _build_parser():
                             help="number of CPUs")
     parser_add.add_argument("--f", type=int, default=1,
                             help="feature mode (1=raw; 2=energy averaged per molecule)")
+    parser_aall = subparsers.add_parser(
+        "addall",
+        help="add every structure in a trajectory to the training data",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_aall.add_argument("--traj", default="structures.traj",
+                             help="trajectory file")
+    parser_aall.add_argument("--step", type=int, default=1000,
+                             help="MLP optimization steps")
+    parser_aall.add_argument("--tolerance", type=float, default=0.005,
+                             help="structure matching tolerance")
+    parser_aall.add_argument("--ncpu", type=int, default=1,
+                             help="number of CPUs")
+    parser_aall.add_argument("--f", type=int, default=1,
+                             help="feature mode (1=raw; 2=energy averaged per molecule)")
+    parser_sc = subparsers.add_parser(
+        "supercell",
+        help="build a supercell from a structure",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_sc.add_argument("--gen", default=None, help="geometry file")
+    parser_sc.add_argument("--traj", default=None, help="trajectory file")
+    parser_sc.add_argument("--x", type=int, default=1, help="repeat along x")
+    parser_sc.add_argument("--y", type=int, default=1, help="repeat along y")
+    parser_sc.add_argument("--z", type=int, default=1, help="repeat along z")
+    parser_sc.add_argument("--i", type=int, default=None, help="frame index")
+    parser_up = subparsers.add_parser(
+        "update",
+        help="add a new trajectory into the existing training data",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_up.add_argument("--traj", default="structures.traj",
+                           help="trajectory file to merge in")
+    parser_up.add_argument("--inde", type=int, default=None,
+                           help="index of the structure to add")
+    parser_up.add_argument("--step", type=int, default=1000,
+                           help="MLP optimization steps")
+    parser_up.add_argument("--tolerance", type=float, default=0.005,
+                           help="structure matching tolerance")
+    parser_up.add_argument("--ncpu", type=int, default=1,
+                           help="number of CPUs")
+
+    parser_info = subparsers.add_parser(
+        "info",
+        help="print energy, lattice and symmetry of a structure",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_info.add_argument("--gen", default=None, help="geometry file")
+    parser_info.add_argument("--traj", default=None, help="trajectory file")
+    parser_info.add_argument("--i", type=int, default=-1, help="frame index")
+    parser_info.add_argument("--no-symmetry", dest="symmetry",
+                             action="store_false",
+                             help="skip symmetry analysis")
+    parser_info.add_argument("--symprec", type=float, default=0.1,
+                             help="symmetry precision")
+    parser_mol = subparsers.add_parser(
+        "molinfo",
+        help="print molecule atom indices for each molecule",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_mol.add_argument("--gen", default="data.traj",
+                            help="trajectory/file of the structure")
+    parser_mol.add_argument("--i", type=int, default=-1, help="frame index")
+    parser_mol.add_argument("--jsonfile", default=None,
+                            help="optional JSON output file")
+    parser_mol.add_argument("--no-verbose", dest="verbose",
+                            action="store_false",
+                            help="reduce output verbosity")
+    parser_pack = subparsers.add_parser(
+        "pack",
+        help="pack structures into a gatheredPOSCARS file",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_pack.add_argument("--output", default="POSCARS",
+                            help="output file name")
+    parser_pack.add_argument("--traj", default=None, help="trajectory file")
+    parser_pack.add_argument("--range", dest="range_", metavar="RANGE",
+                             default=None, help="index range, e.g. 1-10")
+
     return parser
 
 
@@ -194,6 +273,37 @@ def main(argv=None):
         add(traj=args.traj, i=args.i, step=args.step,
             tolerance=args.tolerance, ncpu=args.ncpu, f=args.f)
         return
+    if args.command == "addall":
+        from gpevo.uspexkit.core import addall
+        addall(traj=args.traj, step=args.step, tolerance=args.tolerance,
+               ncpu=args.ncpu, f=args.f)
+        return
+    if args.command == "supercell":
+        from gpevo.uspexkit.core import supercell
+        supercell(gen=args.gen, traj=args.traj, x=args.x, y=args.y,
+                  z=args.z, i=args.i)
+        return
+    if args.command == "update":
+        from gpevo.uspexkit.core import update
+        update(traj=args.traj, inde=args.inde, step=args.step,
+               tolerance=args.tolerance, ncpu=args.ncpu)
+        return
+
+    if args.command == "info":
+        from gpevo.uspexkit.core import info
+        info(gen=args.gen, traj=args.traj, i=args.i,
+             symmetry=args.symmetry, symprec=args.symprec)
+        return
+    if args.command == "molinfo":
+        from gpevo.uspexkit.core import molinfo
+        molinfo(gen=args.gen, i=args.i, jsonfile=args.jsonfile,
+                verbose=args.verbose)
+        return
+    if args.command == "pack":
+        from gpevo.uspexkit.core import pack
+        pack(output=args.output, traj=args.traj, range_=args.range_)
+        return
+
     raise SystemExit(f"unknown command: {args.command}")
 
 
