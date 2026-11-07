@@ -13,16 +13,16 @@ WIDTH = 80
 # FunctionFolder/USPEX_pic.txt
 USPEX_PIC = [
     "                                                         ",
-    " _|    _|     _|_|_|   _|_|_|     _|_|_|_|   _|      _|  ",
-    " _|    _|   _|         _|    _|   _|           _|  _|    ",
-    " _|    _|     _|_|     _|_|_|     _|_|_|         _|      ",
-    " _|    _|         _|   _|         _|           _|  _|    ",
-    "   _|_|     _|_|_|     _|         _|_|_|_|   _|      _|  ",
+    "   ____ _____ ____ _____   _                            ",
+    "  / ___| ____/ ___|_   _| / \\                           ",
+    " | |  _|  _|| |     | |  / _ \\                          ",
+    " | |_| | |__| |___  | | / ___ \\                         ",
+    "  \\____|_____\\____| |_|/_/   \\_\\                        ",
     "                                                         ",
 ]
-VERSION = "Version 9.4.4 (04/10/2015)"
+VERSION = "Version 0.1.0"
 DESCRIPTION = "Evolutionary Algorithm Code for Structure Prediction"
-URL = "more info at http://uspex-team.org"
+URL = "more info at https://gitee.com/fenggo/gpevo"
 
 CITATION_HEAD = [
     "Please cite the following suggested papers",
