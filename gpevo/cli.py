@@ -90,6 +90,28 @@ def _build_parser():
                              help="structure matching tolerance")
     parser_pred.add_argument("--c", type=str, default="nn",
                              help="calculator to use: nn, mtp")
+
+    parser_calc = subparsers.add_parser(
+        "calc",
+        help="run reference calculations for selected crystals",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_calc.add_argument("--t", default="Individuals.traj",
+                             help="trajectory file")
+    parser_calc.add_argument("--den", type=float, default=1.88,
+                             help="density threshold")
+    parser_calc.add_argument("--ids", default=None,
+                             help="crystal indices (space-separated)")
+    parser_calc.add_argument("--step", type=int, default=300,
+                             help="MD steps")
+    parser_calc.add_argument("--ncpu", type=int, default=8,
+                             help="number of CPUs")
+    parser_calc.add_argument("--data", "--dat", dest="data",
+                             default="data", help="data directory name")
+    parser_calc.add_argument("--tolerance", type=float, default=0.01,
+                             help="structure matching tolerance")
+    parser_calc.add_argument("--gen", type=int, default=None,
+                             help="generation number")
     return parser
 
 
@@ -122,6 +144,12 @@ def main(argv=None):
         pred(t=args.t, g=args.g, gen=args.gen, f=args.f, den=args.den,
              ids=args.ids, x=args.x, c=args.c, step=args.step,
              ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance)
+        return
+    if args.command == "calc":
+        from gpevo.uspexkit.core import calc
+        calc(t=args.t, den=args.den, ids=args.ids, step=args.step,
+             ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance,
+             gen=args.gen)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
