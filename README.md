@@ -2,6 +2,8 @@
 
 **GPEvo** 是 USPEX-GP（基于 USPEX-9.4.4）分子晶体结构预测路径（`calculationType=310`）的纯 Python 实现，内置高斯过程（GP）引导的主动学习。不需要 MATLAB / OCTAVE，从 `INPUT.txt` 和分子模板直接运行。
 
+![GPEvo](docs/assets/lockup-wave-light.svg)
+
 | 项目 | 说明 |
 |---|---|
 | 上游项目 | [USPEX](https://uspex-team.org)（MATLAB 原版 `uspex-gp`） |
