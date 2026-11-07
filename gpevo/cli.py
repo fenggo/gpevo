@@ -61,6 +61,35 @@ def _build_parser():
                              help="input geometry file")
     parser_zmat.add_argument("--i", type=int, default=-1,
                              help="frame index")
+
+    parser_pred = subparsers.add_parser(
+        "pred",
+        help="predict density/energy with GP+MLP+RandomForest",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_pred.add_argument("--t", default="Individuals.traj",
+                             help="trajectory file")
+    parser_pred.add_argument("--g", type=str, default=None,
+                             help="geometry structure file")
+    parser_pred.add_argument("--gen", type=int, default=None,
+                             help="generation number")
+    parser_pred.add_argument("--f", type=int, default=1,
+                             help="feature flag (1=8D)")
+    parser_pred.add_argument("--x", type=int, default=-1, help="index")
+    parser_pred.add_argument("--den", type=float, default=1.88,
+                             help="density threshold")
+    parser_pred.add_argument("--ids", default=None,
+                             help="crystal indices (space-separated)")
+    parser_pred.add_argument("--step", type=int, default=300,
+                             help="optimization steps")
+    parser_pred.add_argument("--ncpu", type=int, default=8,
+                             help="number of CPUs")
+    parser_pred.add_argument("--data", "--dat", dest="data",
+                             default="data", help="data directory name")
+    parser_pred.add_argument("--tolerance", type=float, default=0.001,
+                             help="structure matching tolerance")
+    parser_pred.add_argument("--c", type=str, default="nn",
+                             help="calculator to use: nn, mtp")
     return parser
 
 
@@ -87,6 +116,12 @@ def main(argv=None):
     if args.command == "zmat":
         from gpevo.uspexkit.core import zmat
         zmat(geo=args.geo, i=args.i)
+        return
+    if args.command == "pred":
+        from gpevo.uspexkit.core import pred
+        pred(t=args.t, g=args.g, gen=args.gen, f=args.f, den=args.den,
+             ids=args.ids, x=args.x, c=args.c, step=args.step,
+             ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
