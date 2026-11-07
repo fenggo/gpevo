@@ -51,6 +51,16 @@ def _build_parser():
                            help="random-selection draws of the convergence baseline")
     parser_ei.add_argument("-n", "--dry-run", action="store_true",
                            help="print the per-generation report without plotting")
+
+    parser_zmat = subparsers.add_parser(
+        "zmat",
+        help="convert a structure to USPEX Z-matrix format",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_zmat.add_argument("--geo", default="POSCAR",
+                             help="input geometry file")
+    parser_zmat.add_argument("--i", type=int, default=-1,
+                             help="frame index")
     return parser
 
 
@@ -73,6 +83,10 @@ def main(argv=None):
         else:
             ei_report(path=args.path, out=args.out, trials=args.trials,
                       results=args.results)
+        return
+    if args.command == "zmat":
+        from gpevo.uspexkit.core import zmat
+        zmat(geo=args.geo, i=args.i)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
