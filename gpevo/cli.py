@@ -112,6 +112,22 @@ def _build_parser():
                              help="structure matching tolerance")
     parser_calc.add_argument("--gen", type=int, default=None,
                              help="generation number")
+
+    parser_cdata = subparsers.add_parser(
+        "calcdata",
+        help="generate training data with MLP relaxation",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_cdata.add_argument("--t", default="structures.traj",
+                              help="trajectory file")
+    parser_cdata.add_argument("--n", type=int, default=1,
+                              help="number of CPUs")
+    parser_cdata.add_argument("--step", type=int, default=1000,
+                              help="MLP optimization steps")
+    parser_cdata.add_argument("--c", type=str, default="nn",
+                              help="calculator: nn, mtp")
+    parser_cdata.add_argument("--f", type=int, default=1,
+                              help="feature mode (1=raw; 2=energy averaged per molecule)")
     return parser
 
 
@@ -150,6 +166,10 @@ def main(argv=None):
         calc(t=args.t, den=args.den, ids=args.ids, step=args.step,
              ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance,
              gen=args.gen)
+        return
+    if args.command == "calcdata":
+        from gpevo.uspexkit.core import calcdata
+        calcdata(traj=args.t, step=args.step, n=args.n, c=args.c, f=args.f)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
