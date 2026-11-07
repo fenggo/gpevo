@@ -1182,11 +1182,13 @@ def traj(fposcar="gatheredPOSCARS"):
 #  zmat — 内坐标
 # ──────────────────────────────────────────────
 
-def zmat(geo="POSCAR", i=-1):
+def zmat(geo="POSCAR", i=-1, ffield=None):
     """Convert structure to USPEX Z-matrix format."""
     from irff.AtomDance import AtomDance
     atoms = read(geo, index=i)
-    ad = AtomDance(atoms=atoms, rcut={"H-O": 2.7, "O-H": 2.7})
+    if ffield is None:
+        ffield = _resolve_ffield()
+    ad = AtomDance(atoms=atoms, rcut={"H-O": 2.7, "O-H": 2.7}, ffield=ffield)
     zmat_data = ad.InitZmat
     ad.write_zmat(zmat_data, uspex=True)
     ad.close()
@@ -1570,3 +1572,10 @@ def molinfo(gen="data.traj", i=-1, jsonfile=None, verbose=True):
 
     return mols
 
+def _resolve_ffield():
+    if os.path.isfile("ffield.json"):
+        return "ffield.json"
+    bundled = os.path.join(os.path.dirname(__file__), "data", "ffield.json")
+    if os.path.isfile(bundled):
+        return bundled
+    return "ffield.json"
