@@ -128,6 +128,24 @@ def _build_parser():
                               help="calculator: nn, mtp")
     parser_cdata.add_argument("--f", type=int, default=1,
                               help="feature mode (1=raw; 2=energy averaged per molecule)")
+
+    parser_add = subparsers.add_parser(
+        "add",
+        help="add a structure to the training data",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_add.add_argument("--traj", default="structures.traj",
+                            help="trajectory file to read the structure from")
+    parser_add.add_argument("--i", type=int, default=-1,
+                            help="frame index in the trajectory")
+    parser_add.add_argument("--step", type=int, default=1000,
+                            help="MLP optimization steps")
+    parser_add.add_argument("--tolerance", type=float, default=0.005,
+                            help="structure matching tolerance")
+    parser_add.add_argument("--ncpu", type=int, default=1,
+                            help="number of CPUs")
+    parser_add.add_argument("--f", type=int, default=1,
+                            help="feature mode (1=raw; 2=energy averaged per molecule)")
     return parser
 
 
@@ -170,6 +188,11 @@ def main(argv=None):
     if args.command == "calcdata":
         from gpevo.uspexkit.core import calcdata
         calcdata(traj=args.t, step=args.step, n=args.n, c=args.c, f=args.f)
+        return
+    if args.command == "add":
+        from gpevo.uspexkit.core import add
+        add(traj=args.traj, i=args.i, step=args.step,
+            tolerance=args.tolerance, ncpu=args.ncpu, f=args.f)
         return
     raise SystemExit(f"unknown command: {args.command}")
 
