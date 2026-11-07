@@ -4,7 +4,7 @@ The run directory already holds everything this needs, and none of it is
 recomputed here:
 
 * ``results1/Individuals``      -- every structure: generation, id, ML density
-* ``results1/density_predict.log`` -- GP predictions (μ, σ) per crystal
+* ``results1/OUTPUT.txt``       -- GP predictions (μ, ±1.96σ) per crystal
 * ``results1/density.log``      -- the DFT reference of the labelled crystals
 * ``ei.log``                    -- the ids EI sent to DFT, one line per generation
 * ``log``                       -- the ``GP learning curve`` lines of each generation
@@ -34,7 +34,7 @@ import re
 
 from gpevo.runtime import RESIDUAL_CUT
 
-UNCERT_SCALE = 1.96          # gp.csv / density_predict.log store 1.96 * std
+UNCERT_SCALE = 1.96          # OUTPUT.txt's UC columns are 1.96 * std
 
 _LEARNING_CURVE = re.compile(
     r"GP learning curve \(gen\s+(\d+)\):\s*rows\s+(\d+)\s*->\s*(\d+)"
@@ -103,6 +103,48 @@ def parse_density_predict(path):
                     }
                 except ValueError:
                     continue
+    except OSError:
+        return {}
+    return data
+
+
+def parse_output_gp(path):
+    """``{id: {residual, density_gp, std, energy}}`` from OUTPUT.txt.
+
+    Every generation's SUMMARY table ends in
+    ``Enthalpy(GP) UC Density(GP) UC Residual``.  ``density_gp`` is the GP mean
+    EI ranked on; the density ``UC`` is already 1.96*std, so divide it back to
+    the raw std that ``build_summary`` scales up again.
+    """
+    data = {}
+    if not path:
+        return {}
+    in_table = False
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if line.startswith("ID  Origin") and "Density(GP)" in line:
+                    in_table = True
+                    continue
+                if not in_table:
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                if not parts[0].isdigit():
+                    in_table = False
+                    continue
+                try:
+                    enthalpy_gp, _uc_eng, density_gp, uc_den, residual = (
+                        float(value) for value in parts[-5:])
+                except ValueError:
+                    continue        # GP block left blank for this structure
+                data[int(parts[0])] = {
+                    "residual": residual,
+                    "density_gp": density_gp,
+                    "std": uc_den / UNCERT_SCALE,
+                    "energy": enthalpy_gp,
+                }
     except OSError:
         return {}
     return data
@@ -481,11 +523,8 @@ def plot_convergence(ei_series, out_png):
     message = f"  Saved {out_png}"
     with_sigma = sum(1 for e in ei_series if math.isfinite(e.get("sigma", float("nan"))))
     if ei_series and with_sigma < len(ei_series):
-        # Runs made before density_predict.log started accumulating only have
-        # the σ of the last generation, so only the newest pick gets a bar.
         message += (f"  (σ for {with_sigma}/{len(ei_series)} EI-selected "
-                    f"crystals: this run's density_predict.log was rewritten "
-                    f"every generation)")
+                    f"crystals: OUTPUT.txt has no GP row for the others)")
     return message
 
 
@@ -638,9 +677,8 @@ def ei_report(path=".", out=None, trials=200, quiet=False, results=None):
     if not gen_ids:
         return f"No Individuals table under {run_dir}: nothing to plot."
 
-    pred = parse_density_predict(_first(None,
-                                        os.path.join(res_dir, "density_predict.log"),
-                                        os.path.join(run_dir, "density_predict.log")))
+    pred = parse_output_gp(_first(None, os.path.join(res_dir, "OUTPUT.txt"),
+                                  os.path.join(run_dir, "OUTPUT.txt")))
     dft = parse_density_log(_first(None, os.path.join(res_dir, "density.log"),
                                    os.path.join(run_dir, "density.log")))
     # ei.log lives in the run's results<N> now; the home-directory copy is

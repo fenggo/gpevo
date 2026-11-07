@@ -6,6 +6,8 @@
 >
 > 理论依据与教科书口径的差异（EGO 出处、σ 校准前提、top-K vs q-EI、den 硬门 vs cEI）
 > 见姊妹篇 `ei_theoretical_basis.md`；全仓审查与改进清单见 `docs/algorithm_review.md`。
+> `ei-report` 读哪些落盘文件、UC 列与 1.96σ 的换算，见
+> `docs/uq_active_learning_flowchart.md` §「运行产物与 ei-report 的读取口径」。
 >
 > **实施记录（`docs/algorithm_review.md` §0.1）**：EI 现在用真正的后验 σ
 > （`s.sigma_gp = uncertainty/1.96`），`u` 门仍用 1.96σ；`f_best` 在真实选择

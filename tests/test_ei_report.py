@@ -49,6 +49,19 @@ def run(tmp_path):
         for cid, value in densities.items():
             fd.write(f" {cid} 0.004 1.90 1.81 {value:.4f} 0.0170 -28080.9 0.11\n")
 
+    with open(res / "OUTPUT.txt", "w", encoding="utf-8") as fd:
+        header = ("ID  Origin     Composition Enthalpy(eV) Volume(A^3) "
+                  "KPOINTS SYMMETRY Enthalpy(GP)        UC Density(GP)        "
+                  "UC  Residual\n")
+        for gen in range(1, 5):
+            fd.write(header)
+            for i in range(8):
+                cid = (gen - 1) * 8 + i + 1
+                fd.write(f" {cid:4d}   Random      [ 26 36 30 22] -1129.659 "
+                         f"1372.287  [1 1 1]    1     -28080.821    0.1951  "
+                         f"     {densities[cid]:.3f}    0.0333    0.0031\n")
+            fd.write("Local optimization finished\n\n")
+
     # generations 2..4 each got one label: the densest structure of that generation
     picks = {2: 9, 3: 17, 4: 25}
     with open(tmp_path / "ei.log", "w", encoding="utf-8") as fd:
@@ -87,6 +100,20 @@ def test_parsers_read_the_run(run):
     assert sorted(learning) == [2, 3, 4]
     assert learning[3]["added"] == 1
     assert learning[3]["rmse_density"] == pytest.approx(0.0312)
+
+
+def test_gp_predictions_come_from_output_txt(run, tmp_path):
+    path, res, densities, _picks = run
+    pred = report_module.parse_output_gp(str(res / "OUTPUT.txt"))
+    assert len(pred) == 32
+    assert pred[25]["density_gp"] == pytest.approx(densities[25], abs=1e-3)
+    assert pred[25]["std"] == pytest.approx(0.0333 / 1.96)
+    assert pred[25]["residual"] == pytest.approx(0.0031)
+
+    # the old log is no longer the source: deleting it changes nothing
+    os.remove(str(res / "density_predict.log"))
+    text = report_module.ei_report(path=path, out=str(tmp_path / "fig"), quiet=True)
+    assert "32 GP predictions" in text
 
 
 def test_ei_log_keeps_the_last_attempt_of_a_generation(tmp_path):
