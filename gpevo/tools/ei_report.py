@@ -505,22 +505,35 @@ def plot_learning(summary, learning, out_png):
     if not any(map(math.isfinite, sigmas)) and not any(map(math.isfinite, rmses)):
         return "  (learning plot skipped: the run logged neither σ nor a LOO RMSE)"
 
+    # Early generations before GP/density logging started carry no σ, RMSE or
+    # labels, so they only widen the x-range with a blank left margin. Keep only
+    # generations that actually have data, so the plot begins at the first one.
+    has_data = [any((math.isfinite(s), math.isfinite(l), math.isfinite(r)))
+                for s, l, r in zip(sigmas, labelled, rmses)]
+    if not any(has_data):
+        return "  (learning plot skipped: no generation logged σ, RMSE or labels)"
+    plot_gens = [g for g, ok in zip(gens, has_data) if ok]
+    plot_sigmas = [s for s, ok in zip(sigmas, has_data) if ok]
+    plot_labelled = [l for l, ok in zip(labelled, has_data) if ok]
+    plot_rmses = [r for r, ok in zip(rmses, has_data) if ok]
+
     fig, ax = plt.subplots(figsize=(8.5, 5.0))
     twin = ax.twinx()
-    if any(map(math.isfinite, sigmas)):
-        ax.plot(gens, sigmas, "o-", color="#8e44ad", lw=1.8, ms=5,
+    if any(map(math.isfinite, plot_sigmas)):
+        ax.plot(plot_gens, plot_sigmas, "o-", color="#8e44ad", lw=1.8, ms=5,
                 label="mean GP ±1.96σ (± density)")
         ax.set_ylabel(r"mean GP uncertainty (g/cm$^3$)", color="#8e44ad")
-    if any(map(math.isfinite, rmses)):
-        twin.plot(gens, rmses, "s--", color="#d35400", lw=1.6, ms=5,
+    if any(map(math.isfinite, plot_rmses)):
+        twin.plot(plot_gens, plot_rmses, "s--", color="#d35400", lw=1.6, ms=5,
                   label="LOO RMSE (density)")
         twin.set_ylabel(r"LOO RMSE (g/cm$^3$)", color="#d35400")
-    if any(map(math.isfinite, labelled)):
-        twin.bar(gens, [0.0 if not math.isfinite(v) else v for v in labelled],
+    if any(map(math.isfinite, plot_labelled)):
+        twin.bar(plot_gens, [0.0 if not math.isfinite(v) else v for v in plot_labelled],
                  width=0.5, color="#27ae60", alpha=0.25,
                  label="labels added in this generation")
     ax.set_xlabel("Generation")
-    ax.set_xticks(gens)
+    ax.set_xticks(plot_gens)
+    ax.set_xlim(min(plot_gens) - 0.5, max(plot_gens) + 0.5)
     ax.set_title("What the labels bought", fontsize=12, fontweight="bold")
     ax.grid(True, alpha=0.25, linestyle="--")
     main_handles, main_labels = ax.get_legend_handles_labels()
