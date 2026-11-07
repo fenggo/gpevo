@@ -2,11 +2,13 @@
 
 > 本文整理自一次原理追问，回答「swarm 算子的算法原理是什么、对分子晶体有效吗」。
 > 状态：原理讲解 / 评估 + **已修 §5.2 A/B/C，补 §6.4 的 pbest / 惯性**，
-> 并补 `tests/test_swarm_310.py` 回归单测。行号以提交 `53f5811` 之后的实现
-> 为基线，会随提交变陈旧，请按函数名检索（`SwarmMutation_310`、`_min_image`、
-> `_centers`、`_kabsch_rotation`、`_quat_slerp`、`swarm_state.ensure_swarm_state`）。
+> 并补 `tests/test_swarm_310.py` 回归单测。行号以提交 `db63d2f` 为基线，会随提交
+> 变陈旧，请按函数名检索（`SwarmMutation_310`、`_min_image`、`_centers`、
+> `_kabsch_rotation`、`_quat_slerp`、`swarm_state.ensure_swarm_state`）。
 >
 > 姊妹篇：
+> - `swarm_pso_coefficients.md`：**凭什么信 / 边界在哪** —— PSO 系数的稳定三角形
+>   推导、收缩因子来历、推荐取值与量级核算（本文只讲「是什么 / 怎么落」）。
 > - `rotation_operator.md`：同属分子刚体变换的 rotmutation（主轴旋转 + 基团扭转 +
 >   呼吸晶格），以及它的数值 kernel（`Rotate_rigid_body`；swarm 现改用 Kabsch +
 >   四元数 slerp，不再调用该 kernel）。
@@ -269,7 +271,9 @@ heredity 做双亲切片重组；精英保留已隐式提供「朝好结构靠�
    `copy.deepcopy` + `Current_POP.pkl` 均可持久化）；`CalcFitness_310` 每代刷新
    pbest；算子用 `w*v + c1*r1*(pbest-x) + U(0,step)*(g-x)` 更新质心、用四元数
    复合做取向惯性 / 认知 / 社会，并加 `v_max` 截断。`swarmInertia` /
-   `swarmCognitive` 默认 0（保守），设正数启用。
+   `swarmCognitive` 默认 0（保守），设正数启用；**推荐取值与稳定性推导见
+   `swarm_pso_coefficients.md`**（建议 0.6 / 0.5，请勿直接抄教科书 0.7298 /
+   1.49618）。
 5. **纳入自适应调度**：把 `fracSwarm` 加进 `update_STUFF.py` 的 `FRACTIONS` /
    `RL_FRACTIONS`，否则静态配额无法随代数调整。
 6. **做 A/B**：`tests/test_swarm_310.py` 已补回归用例；仍可用 `fixRandSeed`
