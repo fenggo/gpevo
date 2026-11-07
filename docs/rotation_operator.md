@@ -299,8 +299,9 @@ rb   = ref_bonds[tidx]                # 参考键集也按类型
 （`read_molecules.py`、`readMOL.py`、`GetOrientation.py`、
 `Heredity_310.py`、`Mutation_310.py`、`SoftModeMutation_310.py`、
 `variation_common.py` 等），`Rotate_rigid_body` 被
-`GetOrientation.py` / `SwarmMutation_310.py` / `Rotation_310.py` 调用——
-所以这轮收益**对所有 7 个算子都成立**，不止旋转。
+`GetOrientation.py` / `Rotation_310.py` 调用（swarm 自 2026-11-07 起改用
+Kabsch + 四元数 slerp，不再调用）——
+所以这轮收益**覆盖多个算子**，不止旋转。
 
 ### 实测（真实 CL20 36 原子几何）
 
@@ -334,4 +335,5 @@ list / 非 contiguous 输入、刚体运动距离守恒、扩展缺失兜底。
 - [`strain_matrix.md`](strain_matrix.md)：旋转等算子完成后 `mol.ZMATRIX` 的
   刷新与 `Parents.strainMatrix` 的来历。
 - [`swarm_operator.md`](swarm_operator.md)：另一个分子刚体算子（swarm）的原理，
-  及其与 rotmutation 在作用单位 / 取向处理上的差别。
+  及其与 rotmutation 在作用单位 / 取向处理上的差别（swarm 的取向现在走
+  Kabsch + 四元数 slerp，不再调用 `Rotate_rigid_body`）。

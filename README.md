@@ -218,10 +218,12 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 ```
 0.1   : fracSwarm    % 每代额外产生的 swarm 结构数 = round(populationSize × 该值)
 0.5   : swarmStep    % 分子向最优结构对应分子移动的位移比例上限（0~1）
-30    : swarmAngle   % 移动后附加的刚体随机转动角度上限（度）
+30    : swarmAngle   % 取向朝最优结构 slerp 插值的转动角度上限（度，0 = 不转）
+0     : swarmInertia % PSO 惯性权重 w（0 = 无动量）
+0     : swarmCognitive % PSO 认知项系数 c1（0 = 不用个体历史最优）
 ```
 
-它把每个**分子整体**当作一个刚体，向当代最优结构中对应分子的位置移动一个随机比例的位移，再叠加一个随机刚体转动——`MOLCOORS` 只做刚体变换，分子内几何**逐位不变**，因此不像原子级软模位移那样会把分子撕开。位移会先把最优结构的质心按其晶胞对齐到子代参考系再做最小镜像折叠，晶胞本身不变（交给后续弛豫）。算法细节、与 PSO 的差别、以及对多组分共晶的适用性评估见 [`docs/swarm_operator.md`](docs/swarm_operator.md)。
+它把每个**分子整体**当作一个刚体，向当代最优结构中对应分子的位置移动一个随机比例的位移，取向则用 Kabsch + 四元数 slerp 朝对应分子插值（单次转动不超过 `swarmAngle`，不再是随机转动）——`MOLCOORS` 只做刚体变换，分子内几何**逐位不变**，因此不像原子级软模位移那样会把分子撕开。位移会先把最优结构的质心按其晶胞对齐到子代参考系再做最小镜像折叠，晶胞本身不变（交给后续弛豫）。每个结构还携带一份可 pickle 的速度 / 个体历史最优（pbest）状态，随 `Current_POP.pkl` 重启不丢，由 `swarmInertia` / `swarmCognitive` 两个系数控制动量与认知项（默认 0 = 只保留朝当代最优的社会项）。算法细节、与 PSO 的差别、以及对多组分共晶的适用性评估见 [`docs/swarm_operator.md`](docs/swarm_operator.md)。
 
 两点说明：
 
@@ -401,7 +403,7 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 | `molecule_damage_check.md` | 分子损坏检测的三道检查、1.780 Å 分子间 N–N 键漏检的原因与改进建议 |
 | `strain_matrix.md` | `Parents.strainMatrix` 的来历（晶格应变）、为何零读者、gpevo 不存它的影响面 |
 | `rotation_operator.md` | 旋转算子的两类旋转（刚体 vs 基团扭转）、默认角度（90° / ±90°·±60°·±30°）、`fracRotMut` 默认 0.1、呼吸晶格 10–20% |
-| `swarm_operator.md` | swarm 算子的算法原理（逐分子向当代最优插值 + 随机刚体旋转）、与教科书 PSO / MATLAB PSO 的对照、对分子晶体的适用性、晶胞对齐与 MtypeLIST 断言的修复及剩余改进方向 |
+| `swarm_operator.md` | swarm 算子的算法原理（逐分子向当代最优插值 + 取向四元数 slerp + pbest/惯性）、与教科书 PSO / MATLAB PSO 的对照、对分子晶体的适用性、晶胞对齐 / MtypeLIST 断言 / 取向 slerp / pbest 惯性状态 的修复及剩余改进方向 |
 | `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
 
 ## 与 MATLAB 版的关系

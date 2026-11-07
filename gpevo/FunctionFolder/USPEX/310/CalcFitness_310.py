@@ -98,6 +98,13 @@ def CalcFitness_310():
     POP.fitness = fitness
     G["POP_STRUC"] = POP
 
+    # Swarm operator (docs/swarm_operator.md 6.4): refresh each individual's
+    # personal best whenever a generation's fitness is evaluated.  The state
+    # is stored on the individual, so it travels with the lineage through
+    # Current_POP.pkl restarts.  Never raises.
+    from gpevo.FunctionFolder.USPEX.src.swarm_state import update_pbest
+    update_pbest(POP, fitness)
+
     # Native port of `uspexkit denevo`: draw the GP status figure from memory
     # every generation that actually carries predictions from ``gp()``.  Before
     # the training set is seeded there is nothing to draw and plot_gp_generation

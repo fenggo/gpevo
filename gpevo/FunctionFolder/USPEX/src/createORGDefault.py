@@ -108,7 +108,9 @@ def createORGDefault():
     ORG.fracSwarm = 0.0
     ORG.howManySwarm = 0
     ORG.swarmStep = 0.5          # fraction of the displacement toward the best
-    ORG.swarmAngle = 30.0        # max rigid rotation, degrees
+    ORG.swarmAngle = 30.0        # max orientation slerp toward g, degrees
+    ORG.swarmInertia = 0.0       # PSO inertia weight w (0 = no momentum)
+    ORG.swarmCognitive = 0.0     # PSO cognitive pull toward pbest, c1 (0 = off)
     ORG.softStepScale = 1.0
     ORG.fracGene = 0.5
     ORG.fracRand = 0.2

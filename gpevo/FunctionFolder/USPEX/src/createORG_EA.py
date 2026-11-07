@@ -65,6 +65,8 @@ def createORG_EA(inputFile):
     ORG.fracSwarm = _flo(p.option("fracSwarm"), ORG.fracSwarm)
     ORG.swarmStep = _flo(p.option("swarmStep"), ORG.swarmStep)
     ORG.swarmAngle = _flo(p.option("swarmAngle"), ORG.swarmAngle)
+    ORG.swarmInertia = _flo(p.option("swarmInertia"), ORG.swarmInertia)
+    ORG.swarmCognitive = _flo(p.option("swarmCognitive"), ORG.swarmCognitive)
 
     # Continuous mutation amplitudes.  They are fixed when the RL bandit is
     # off and become the *starting point* of the RL inner parameters when it
