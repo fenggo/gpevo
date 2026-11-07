@@ -2,8 +2,8 @@
 *      TYPE OF RUN AND SYSTEM            *
 ******************************************
 USPEX  : calculationMethod (USPEX, VCNEB, META)
-310    : calculationType (dimension: 0-3; molecule: 0/1; varcomp: 0/1)
-11     : optType 
+310    : calculationType   (dimension: 0-3; molecule: 0/1; varcomp: 0/1)
+11     : optType           (use Hilbert space distance as fitness)
 0.3    : SymTolerance
 1      : checkMolecules
 
@@ -12,16 +12,16 @@ C O N H
 % EndAtomType
 
 % numSpecies
-1 1
+2 2
 % EndNumSpecies
 
 ******************************************
 *               POPULATION               *
 ******************************************
-200   : populationSize
-200   : initialPopSize
-1     : numGenerations
-5     : stopCrit 
+100   : populationSize
+100   : initialPopSize
+50    : numGenerations
+10    : stopCrit 
 0.7   : bestFrac 
 ******************************************
 *          VARIATION OPERATORS           *
@@ -32,7 +32,7 @@ C O N H
 0.15   : fracLatMut
 0.02   : fracPerm
 0.58   : fracRotMut
-
+0.15    : fracSwarm
 
 10    :  RmaxFing  
 0.04  :  deltaFing 
@@ -40,21 +40,19 @@ C O N H
 
 ******************************************
 *     GAUSSIAN PROCESS PARAMETER         *
-****************************************
-  1      : gp          % 开关（0/1），=1 时在弛豫后追加一步 GP
-  8      : ncpu        % gp() 的  numProcessors 
-  data12 : data      % 数据目录（--data）
-  1.8    : den         % 密度阈值：gp() 的 --den + CalcFitness 的 EI 门
-  0.03   : u           % 主动学习不确定度阈值（超此值才送 DFT）
-  2      : k           % 每代 EI top-K 个数
-  2      : nboot       % 训练集为空时首批打标签的结构数（需 ≥2）
+******************************************
+1      : gp          % 开关（0/1），=1 时在弛豫后追加一步 GP
+4      : ncpu        % gp() 的  numProcessors 
+data22 : data      % 数据目录（--data）
+1.8    : den         % 密度阈值：gp() 的 --den + CalcFitness 的 EI 门
+0.03   : u           % 主动学习不确定度阈值（超此值才送 DFT）
+1      : k           % 每代 EI top-K 个数
+1      : explore
 
-% 顺序 C O N H；取完好结构各元素对分子间距离的 5% 分位（旧值 H-H=1.37 等过松，
-% 是 ReaxFF 弛豫撕开分子的主要原因）。注意：注释必须放在块外，否则整块被跳过。
-% IonDistances
-1.94 1.84 1.85 1.75
-1.84 1.73 1.75 1.75
-1.85 1.75 1.77 1.75
+% IonDistances   
+1.90 1.85 1.85 1.75
+1.85 1.85 1.85 1.75
+1.85 1.85 1.85 1.75
 1.75 1.75 1.75 1.75
 % EndDistances
 
@@ -65,7 +63,7 @@ C O N H
 
 
 % Latticevalues
-1000
+2500
 % Endvalues
 
 ******************************************
