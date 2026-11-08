@@ -136,7 +136,12 @@ ei        : mode          % ei | random | uncertainty
 2         : nboot         % structures labelled in the first batch when the training set is empty (default 2, must be ≥2)
 1         : cache         % 1 (default) = pred reuses the 10-D feature already computed in the GP step; 0 = recompute per crystal
 1         : explore       % 1 (default) = full EI; 0 = drop the σ·φ(Z) term and rank by improvement alone
+sklearn   : gpbackend     % GP training backend: sklearn (default) | gpytorch (opt-in)
+200       : gpiter        % max L-BFGS iterations per restart (gpytorch only)
+0.1       : gplr          % L-BFGS learning rate (gpytorch only)
 ```
+
+`gpbackend` / `gpiter` / `gplr` select the opt-in GPyTorch training backend (`pip install gpevo[gpytorch]`). With the default `sklearn` backend nothing changes. GPyTorch is a **different model** (LinearKernel / RBFKernel parameterisation, L-BFGS on the exact marginal log likelihood, GaussianLikelihood noise), so its OUTPUT.txt values are not byte-for-byte comparable with the sklearn/MATLAB parity run, and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and no longer needs an external uspexkit install.
 
 #### `explore : 0` — turning off EI's exploration term
 
@@ -206,11 +211,11 @@ Each generation also prints a learning-curve line — **this line is the evidenc
   GP learning curve (gen 3): rows 216 -> 220 (+4)  LOO RMSE density=0.0312 g/cm^3  energy=0.4123 eV
 ```
 
-`LOO RMSE` is computed directly from the Cholesky factor of the already-fitted model via the hat-matrix identity (Rasmussen & Williams 5.12, no refitting needed); the hyperparameters are the ones fitted on all the data so far, so it is slightly optimistic. It shows `n/a` when the database exceeds 2000 rows or the cached uspexkit model cannot be found.
+`LOO RMSE` is computed directly from the Cholesky factor of the already-fitted model via the hat-matrix identity (Rasmussen & Williams 5.12, no refitting needed); the hyperparameters are the ones fitted on all the data so far, so it is slightly optimistic. It shows `n/a` when the database exceeds 2000 rows, the cached uspexkit model cannot be found, or the backend is `gpytorch` (the hat-matrix identity needs sklearn's Cholesky factor / `alpha_`).
 
 When nothing grows, it also says which gate blocked it (`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`). The usual cause is that the reference method cannot run: labels depend on `siesta` (`mpirun`) + `<homePath>/Specific/*.psf`, and a missing one triggers an early warning at startup. Every generation also draws `results*/gp_gen*.png` (four panels: population distribution / exploration map / predicted vs adopted values / extrapolation check).
 
-> The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), called as an in-process API; changing the kernel requires reinstalling uspexkit.
+> The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), vendored into `gpevo/uspexkit/` and called as an in-process API; changing the kernel means editing the vendored `core.py`. The default `sklearn` backend is the one used for MATLAB character-for-character parity. With `gpbackend : gpytorch` an opt-in GPyTorch model is trained instead — different kernel parameterisation and optimiser, so its numbers are not directly comparable and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and needs no external uspexkit install.
 
 ### swarm operator (optional)
 

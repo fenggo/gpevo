@@ -24,7 +24,7 @@ GP 的输入是 `uspexkit` 造的 10 维特征（`feature_mlp.csv`），输出 D
 ## 2. 实验设计
 
 - **数据**：`~/tnt22/data22`，216 个样本（TNT，固定组分），含 `feature_mlp.csv` / `feature.csv` / `structures.traj`。
-- **模型**：**照抄生产核** `uspexkit.core.load_gaussian_process`（`core.py:582-601`）——ARD 长度尺度 + `n_restarts_optimizer=10`。用别的核会让比较失去意义（见第 5 节）。
+- **模型**：**照抄生产核** `gpevo.uspexkit.core.load_gaussian_process`（`gpevo/uspexkit/core.py`）——ARD 长度尺度 + `n_restarts_optimizer=10`。用别的核会让比较失去意义（见第 5 节）。
 - **降维**：指纹 216×4000（4 元素 → 16 个元素对 × 250 分箱），PCA 降到 3/5/8 维；**PCA 只在训练折内拟合**，不泄漏。
 - **评估**：5 折 CV，看 MAE 与 R²。
 - **对照**：把指纹**行随机打乱**再跑。若"提升"在打乱后依然存在，那它只是"多加了列"的数值假象。
@@ -70,7 +70,7 @@ python docs/feature_ablation.py --data ~/tnt22/data22 --restarts 0   # 快速版
 2. **打乱对照照样给 R² 0.61**（真指纹 0.68），说明"提升"只是多加了几个标准化列带来的副作用。
 
 **教训**：
-- 多维 GP 一定要用 **ARD**（逐维长度尺度）。生产代码 `core.py:582` 写的是 `length_scale = [0.1] * n`（列表），所以生产没问题；但任何自己搭的 GP 基线都要检查这一点。
+- 多维 GP 一定要用 **ARD**（逐维长度尺度）。生产代码 `gpevo/uspexkit/core.py` 的 `load_gaussian_process` 写的是 `length_scale = [0.1] * n`（列表），所以生产没问题；但任何自己搭的 GP 基线都要检查这一点。
 - **任何"特征有效"的结论都必须配打乱对照**，否则无法区分"信号"和"多加了几列"。
 
 ## 6. 结论边界

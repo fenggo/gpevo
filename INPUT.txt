@@ -96,3 +96,7 @@ data11_22 : data          % 训练数据目录（uspexkit 的 --data）
 1         : k             % 每代 EI top-K 个数
 ei        : mode          % ei | random | uncertainty
 2         : nboot         % 训练集为空时首批打标签的结构数（需 ≥2）
+% 可选 GP 训练后端（默认 sklearn，不写即可保持原行为；需 pip install gpytorch）：
+% gpytorch : gpbackend
+% 200      : gpiter
+% 0.1      : gplr

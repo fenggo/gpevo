@@ -28,6 +28,11 @@ dependencies = [
 dev = [
     "pytest>=7.0",
 ]
+# Optional GP training backend.  sklearn stays the default (see INPUT.txt
+# gpbackend); torch is only pulled in when this extra is installed.
+gpytorch = [
+    "gpytorch>=1.11",
+]
 
 [project.scripts]
 # 发行名是 GPEvo；命令按 CLI 惯例保持小写。

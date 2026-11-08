@@ -183,7 +183,8 @@ def get_nmol(atoms):
     return len(m_)
 
 
-def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,pop=100,ref='results1',id_=None,k=1,mode='ei',optype=11):
+def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,pop=100,ref='results1',id_=None,k=1,mode='ei',optype=11,
+       backend="sklearn",training_iter=200,learning_rate=0.1):
     ''' Gaussian Process '''
     write_input(inp='inp-grad',keyword='grad conv qiterative verb')
     run_gulp(n=n,inp='inp-grad')
@@ -233,7 +234,9 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     res, imin, X_ = raw_residual(feature, d, scaler)
     ind    = np.where(res < tolerance)
 
-    gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
+    gpr_energy, gpr_density = load_gaussian_process(
+        X, y, y_eng, backend=backend, training_iter=training_iter,
+        learning_rate=learning_rate)
     rfr_density = load_rfr(X, y)
     if not exists('gp.csv'):
         with open('gp.csv','w') as fd:
@@ -331,20 +334,26 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                        # 自身预测 -> 更新高斯均值 + 不确定度。带 WhiteKernel
                        # 观测噪声时训练点处后验 σ 不为零, 正是三角上误差棒
                        # 的长度。失败则保留 nan (绘图端回退为 σ=0)。
-                       try:
-                           X_upd = np.vstack([X, X_[0]])
-                           y_upd = np.concatenate([y, np.array([density_])])
-                           gpr_upd = GaussianProcessRegressor(
-                               kernel=gpr_density.kernel_,
-                               alpha=gpr_density.alpha,
-                               optimizer=None,
-                               normalize_y=True)
-                           gpr_upd.fit(X_upd, y_upd)
-                           mu_upd, sd_upd = gpr_upd.predict(X_, return_std=True)
-                           density_updated = float(mu_upd[0])
-                           uncert_updated = float(1.96 * sd_upd[0])
-                       except Exception as _err:
-                           print(f'[gp] updated posterior failed for id {id_}: {_err}')
+                       # This fit reuses sklearn's fitted kernel_/alpha; a
+                       # gpytorch kernel_ is a gpytorch object and cannot be
+                       # fed back to GaussianProcessRegressor.  Skip it there:
+                       # density_updated / uncert_updated stay nan and the
+                       # plots already fall back to sigma=0.
+                       if hasattr(gpr_density, "L_"):
+                           try:
+                               X_upd = np.vstack([X, X_[0]])
+                               y_upd = np.concatenate([y, np.array([density_])])
+                               gpr_upd = GaussianProcessRegressor(
+                                   kernel=gpr_density.kernel_,
+                                   alpha=gpr_density.alpha,
+                                   optimizer=None,
+                                   normalize_y=True)
+                               gpr_upd.fit(X_upd, y_upd)
+                               mu_upd, sd_upd = gpr_upd.predict(X_, return_std=True)
+                               density_updated = float(mu_upd[0])
+                               uncert_updated = float(1.96 * sd_upd[0])
+                           except Exception as _err:
+                               print(f'[gp] updated posterior failed for id {id_}: {_err}')
 
                        dft_done = True
 
@@ -573,31 +582,46 @@ def get_gulp_energy(atoms, ncpu=8,o=True):
 # silently keep the old kernel (the old code required deleting the pkls by
 # hand -- see the commented-out "refit" logic this replaces).
 _KERNEL_VERSION = 2
+# Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag at 2
+# means switching backends always refits, without invalidating existing
+# sklearn caches.
+_GPYTORCH_VERSION = "gpytorch-1"
 
 
-def _load_or_fit_gpr(path, X, y, kernel):
-    """Fit a GPR with `kernel`, caching it in `path` under _KERNEL_VERSION.
+def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
+                     training_iter=200, learning_rate=0.1):
+    """Fit a GPR with `kernel`, caching it under a backend-specific version.
 
-    A cache entry written by an older revision (or a bare model pickle from
-    before versioning) is retrained and overwritten.
+    A cache entry written by an older revision, by the other backend, or a bare
+    model pickle from before versioning is retrained and overwritten.  The
+    default (sklearn) path keeps the original construction byte-for-byte.
     """
+    version = _KERNEL_VERSION if backend == "sklearn" else _GPYTORCH_VERSION
     if exists(path):
         try:
             with open(path, "rb") as f:
                 blob = pickle.load(f)
-            if isinstance(blob, dict) and blob.get("version") == _KERNEL_VERSION:
+            if isinstance(blob, dict) and blob.get("version") == version:
                 return blob["model"]
         except Exception:
             pass                        # unreadable/old format -> refit
-    gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10,
-                                   normalize_y=True, random_state=0)
+    if backend == "gpytorch":
+        from .gp import GPyTorchRegressor   # lazy: sklearn path never imports torch
+        gpr = GPyTorchRegressor(kernel=kernel, n_restarts_optimizer=10,
+                                normalize_y=True, random_state=0,
+                                training_iter=training_iter,
+                                learning_rate=learning_rate, core=core)
+    else:
+        gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10,
+                                       normalize_y=True, random_state=0)
     gpr.fit(X, y)
     with open(path, "wb") as f:
-        pickle.dump({"version": _KERNEL_VERSION, "model": gpr}, f)
+        pickle.dump({"version": version, "model": gpr}, f)
     return gpr
 
 
-def load_gaussian_process(X, y, y_eng):
+def load_gaussian_process(X, y, y_eng, backend="sklearn",
+                          training_iter=200, learning_rate=0.1):
     length_scale = [0.1 for i in range(X.shape[1])]
     # density: Matern 5/2 + linear + noise.  LOO on the training set showed
     # this target is insensitive to the core (RBF is within noise), so the
@@ -619,8 +643,14 @@ def load_gaussian_process(X, y, y_eng):
         + 0.35**2 * RBF(length_scale=length_scale)
         + WhiteKernel(noise_level=0.1, noise_level_bounds=(1e-8, 1e-1))
     )
-    gpr_density = _load_or_fit_gpr("gpr_density.pkl", X, y, kernel_density)
-    gpr_energy = _load_or_fit_gpr("gpr_energy.pkl", X, y_eng, kernel_energy)
+    gpr_density = _load_or_fit_gpr("gpr_density.pkl", X, y, kernel_density,
+                                   backend=backend, core="matern",
+                                   training_iter=training_iter,
+                                   learning_rate=learning_rate)
+    gpr_energy = _load_or_fit_gpr("gpr_energy.pkl", X, y_eng, kernel_energy,
+                                  backend=backend, core="rbf",
+                                  training_iter=training_iter,
+                                  learning_rate=learning_rate)
 
     with open("gpcsp.log", "w") as fl:
         print("density:", gpr_density.kernel_, file=fl)
@@ -652,7 +682,8 @@ def load_rfr(X, y):
 # ──────────────────────────────────────────────
 
 def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
-         c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None):
+         c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None,
+         backend="sklearn",training_iter=200,learning_rate=0.1):
     """
     Predict density and energy using Gaussian Process + MLP + RandomForest.
 
@@ -726,7 +757,9 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     y_eng = data_[:, 1]
     scaler = preprocessing.StandardScaler().fit(X_raw)
     X      = scaler.transform(X_raw)
-    gpr_energy, gpr_density = load_gaussian_process(X, y, y_eng)
+    gpr_energy, gpr_density = load_gaussian_process(
+        X, y, y_eng, backend=backend, training_iter=training_iter,
+        learning_rate=learning_rate)
     rfr = load_rfr(X, y)
     chdir(root_dir)
 

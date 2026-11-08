@@ -26,11 +26,15 @@ k(\mathbf{x}_i, \mathbf{x}_j) = 0.00581^2 \, k_{\text{DotProduct}}(\mathbf{x}_i,
 \;+\; k_{\text{White}}(\mathbf{x}_i, \mathbf{x}_j)
 $$
 
-The core is a Matérn kernel with $\nu = 5/2$ for **density**, and an RBF kernel for **energy**: the DFT energy surface of same-composition polymorphs is smoother than $\nu = 5/2$ assumes, and leave-one-out favoured RBF (RMSE 0.233 vs 0.254 eV, $R^2$ 0.821 vs 0.788). Both cores carry ARD length scales, one per descriptor, initialised to 0.1 and fitted with `n_restarts_optimizer=10`, `normalize_y=True` and `random_state=0` (see `uspexkit/core.py:586-607`).
+The core is a Matérn kernel with $\nu = 5/2$ for **density**, and an RBF kernel for **energy**: the DFT energy surface of same-composition polymorphs is smoother than $\nu = 5/2$ assumes, and leave-one-out favoured RBF (RMSE 0.233 vs 0.254 eV, $R^2$ 0.821 vs 0.788). Both cores carry ARD length scales, one per descriptor, initialised to 0.1 and fitted with `n_restarts_optimizer=10`, `normalize_y=True` and `random_state=0` (see `gpevo/uspexkit/core.py`, `load_gaussian_process`).
 
-The feature vector $\mathbf{x} \in \mathbb{R}^{10}$ encodes ten cheap ReaxFF descriptors — total, bond, angle, torsion and van der Waals energies ($e_{\text{tot}}, e_{\text{bond}}, e_{\text{ang}}, e_{\text{tor}}, e_{\text{vdW}}$), three hydrogen-bond terms distinguished by the acceptor atom ($e_{\text{hb}}^{\text{CHO}}, e_{\text{hb}}^{\text{CHN}}, e_{\text{hb}}^{\text{CHC}}$), the Coulomb energy $e_{\text{coul}}$ and the ReaxFF density. They are standardised before fitting (`uspexkit/core.py:702-711`).
+The feature vector $\mathbf{x} \in \mathbb{R}^{10}$ encodes ten cheap ReaxFF descriptors — total, bond, angle, torsion and van der Waals energies ($e_{\text{tot}}, e_{\text{bond}}, e_{\text{ang}}, e_{\text{tor}}, e_{\text{vdW}}$), three hydrogen-bond terms distinguished by the acceptor atom ($e_{\text{hb}}^{\text{CHO}}, e_{\text{hb}}^{\text{CHN}}, e_{\text{hb}}^{\text{CHC}}$), the Coulomb energy $e_{\text{coul}}$ and the ReaxFF density. They are standardised before fitting (`gpevo/uspexkit/core.py`, `gp()` / `pred()`).
 
 The targets are the corresponding DFT quantities stored in a parallel file, so each surrogate learns a correction to the cheap model rather than the property itself ($\Delta$-learning): the density model regresses the DFT density, the energy model the DFT energy. Both are trained on the same $N$ structures that have been labelled so far.
+
+#### GPyTorch backend (opt-in)
+
+`gpbackend : gpytorch` replaces the sklearn `GaussianProcessRegressor` with the vendored `gpevo/uspexkit/gp.py` wrapper (`GPyTorchRegressor`); `gpiter` sets the L-BFGS iteration budget and `gplr` the learning rate. It keeps the same kernel **families** — `ScaleKernel(LinearKernel()) + ScaleKernel(MaternKernel(ν=2.5))` for density and `ScaleKernel(RBFKernel)` for energy — with observation noise carried by a `GaussianLikelihood`. The parameterisation is not identical: there is no DotProduct `sigma_0` / bound, no WhiteKernel upper bound, and hyperparameters are fitted by L-BFGS on the exact marginal log likelihood rather than sklearn's 10-restart L-BFGS-B. Predictions therefore differ from the sklearn backend; the default stays sklearn for character-for-character parity. The learning-curve `LOO RMSE` is sklearn-only (it needs the Cholesky factor / `alpha_`) and reports `n/a` under gpytorch. Model caches carry a separate version tag (`gpytorch-1` vs `2`) so switching backends always refits.
 
 ### 2.2 UQ-Driven Active Learning Cycle
 

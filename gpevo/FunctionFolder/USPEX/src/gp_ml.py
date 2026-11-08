@@ -242,13 +242,42 @@ def _ncpu(ORG):
     return 8
 
 
+def _gp_backend(ORG):
+    """GP training backend of INPUT.txt (``gpbackend``); sklearn by default."""
+    return str(_opt(ORG, "gpBackend", "sklearn")).lower()
+
+
+def _backend_ready(backend):
+    """Fail fast when gpytorch is selected but not installed.
+
+    ``_call`` swallows exceptions raised inside uspexkit, so a missing backend
+    has to be caught *before* it -- otherwise a ``gpbackend : gpytorch`` run
+    would silently produce sklearn results under the gpytorch setting.
+    """
+    if backend != "gpytorch":
+        return True
+    import importlib.util
+    if importlib.util.find_spec("gpytorch") is not None:
+        return True
+    console_print("  ERROR: gpbackend : gpytorch selected but gpytorch is not installed;")
+    console_print("         install it with `pip install gpytorch` (or `pip install gpevo[gpytorch]`).")
+    console_print("         GP step skipped; NOT falling back to sklearn silently.")
+    return False
+
+
 def run_gp(ORG, cwd=None, id_=None):
     """Run ``uspexkit.gp(...)``; returns its metrics dict (None on failure)."""
+    backend = _gp_backend(ORG)
+    if not _backend_ready(backend):
+        return None
     kwargs = {
         "n": _ncpu(ORG),
         "dat": str(getattr(ORG, "gpData", "data") or "data"),
         "den": float(getattr(ORG, "gpDen", 0.0) or 0.0),
         "optype": int(getattr(ORG, "optType", 11) or 11),
+        "backend": backend,
+        "training_iter": int(_opt(ORG, "gpTrainingIter", 200)),
+        "learning_rate": float(_opt(ORG, "gpLr", 0.1)),
     }
     if id_ is not None:
         kwargs["id_"] = int(id_)
@@ -424,6 +453,11 @@ def parse_gp_params(ORG):
         # uspexkit indexes the training array as data[:, 1:], which raises on
         # a single row.
         "nboot": int(_opt(ORG, "gpNboot", 2)),
+        # GP training backend (INPUT.txt gpbackend / gpiter / gplr).  Passed to
+        # both gp() and pred() so one generation never mixes two backends.
+        "backend": _gp_backend(ORG),
+        "training_iter": int(_opt(ORG, "gpTrainingIter", 200)),
+        "learning_rate": float(_opt(ORG, "gpLr", 0.1)),
         # optType 1 minimises the enthalpy, so the acquisition runs on the GP
         # energy; every other optType keeps the density.
         "optType": int(getattr(ORG, "optType", 11) or 11),
@@ -800,12 +834,24 @@ def _cached_models(data_dir):
             return None
         if version is not None and blob.get("version") != version:
             return None                  # stale cache: not this model
-        models.append(blob.get("model"))
+        model = blob.get("model")
+        # The LOO hat matrix (_loo_rmse) needs sklearn's Cholesky factor L_ /
+        # alpha_.  A gpytorch cache carries a different version tag anyway;
+        # this guard also covers mixed caches so LOO degrades to `n/a` instead
+        # of raising inside _loo_rmse.
+        if not hasattr(model, "L_"):
+            return None
+        models.append(model)
     return models if all(models) else None
 
 
 def _loo_rmses(data_dir):
-    """``(density, energy)`` LOO RMSE of the cached models, None when unknown."""
+    """``(density, energy)`` LOO RMSE of the cached models, None when unknown.
+
+    With ``gpbackend : gpytorch`` the cached models have no sklearn Cholesky
+    factor, so ``_cached_models`` returns None and the learning curve reports
+    ``LOO RMSE: n/a`` -- the hat-matrix identity is sklearn-only.
+    """
     try:
         from sklearn.preprocessing import StandardScaler
 
@@ -1072,11 +1118,16 @@ def _gp_active_learning(ORG, POP, fitness):
             console_print(f"  pred: reusing the GP-step feature for "
                           f"{len(features)}/{len(pred_ids)} crystal(s), "
                           f"skipping their ReaxFF re-optimisation")
+    if not _backend_ready(params["backend"]):
+        return fitness
     console_print(f"  Running: uspexkit.pred(ids='{' '.join(str(i) for i in pred_ids)}')")
     ok, results = _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
                         ncpu=int(params["ncpu"]), den=0.0,
                         ids=" ".join(str(i) for i in pred_ids), dat=params["dat"],
-                        features=features or None)
+                        features=features or None,
+                        backend=params["backend"],
+                        training_iter=int(params["training_iter"]),
+                        learning_rate=float(params["learning_rate"]))
     if not ok or not isinstance(results, dict) or not results:
         console_print("  Warning: uspexkit.pred returned no predictions, "
                       "fitness left unchanged")

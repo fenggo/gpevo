@@ -134,7 +134,12 @@ ei        : mode          % ei | random | uncertainty
 2         : nboot         % 训练集为空时首批打标签的结构数（默认 2，需 ≥2）
 1         : cache         % 1（默认）= pred 复用 GP 步已算出的 10 维特征；0 = 每个晶体重算
 1         : explore       % 1（默认）= 完整 EI；0 = 去掉 σ·φ(Z) 项，只按提升量排序
+sklearn   : gpbackend     % GP 训练后端：sklearn（默认）| gpytorch（可选）
+200       : gpiter        % 每次重启的 L-BFGS 最大迭代数（仅 gpytorch）
+0.1       : gplr          % L-BFGS 学习率（仅 gpytorch）
 ```
+
+`gpbackend` / `gpiter` / `gplr` 控制可选的 GPyTorch 训练后端（`pip install gpevo[gpytorch]`）。默认 `sklearn` 时行为完全不变。GPyTorch 是**另一套模型**（LinearKernel / RBFKernel 参数化、在精确边际似然上做 L-BFGS、GaussianLikelihood 噪声），其 OUTPUT.txt 数值与 sklearn/MATLAB 对拍运行不逐字节可比，学习曲线会打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不再依赖外部安装的 uspexkit。
 
 #### `explore : 0` —— 关掉 EI 的探索项
 
@@ -204,11 +209,11 @@ EI 用哪个量做采集函数，由 `optType` 决定：
   GP learning curve (gen 3): rows 216 -> 220 (+4)  LOO RMSE density=0.0312 g/cm^3  energy=0.4123 eV
 ```
 
-`LOO RMSE` 用帽子矩阵恒等式从已拟合模型的 Cholesky 因子直接算（Rasmussen & Williams 5.12，无需重拟合），超参是全程数据上拟合的那套，所以偏乐观一点；库超过 2000 行或找不到 uspexkit 缓存的模型时显示 `n/a`。
+`LOO RMSE` 用帽子矩阵恒等式从已拟合模型的 Cholesky 因子直接算（Rasmussen & Williams 5.12，无需重拟合），超参是全程数据上拟合的那套，所以偏乐观一点；库超过 2000 行、找不到 uspexkit 缓存的模型、或后端为 `gpytorch` 时显示 `n/a`（帽子矩阵恒等式依赖 sklearn 的 Cholesky 因子 / `alpha_`）。
 
 没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
 
-> GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），以进程内 API 方式调用；改内核需重装 uspexkit。
+> GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），已 vendored 到 `gpevo/uspexkit/` 并以进程内 API 方式调用；改内核只需编辑仓库内这份 `core.py`。默认 `sklearn` 后端是 MATLAB 字符级对拍用的那一套。设 `gpbackend : gpytorch` 时改用可选的 GPyTorch 模型——核参数化与优化器都不同，数值不可直接比较，学习曲线打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不需要外部安装 uspexkit。
 
 ### swarm 算子（可选）
 

@@ -48,6 +48,10 @@ data22 : data      % 数据目录（--data）
 0.03   : u           % 主动学习不确定度阈值（超此值才送 DFT）
 1      : k           % 每代 EI top-K 个数
 1      : explore
+% 可选 GP 训练后端（默认 sklearn，不写即可保持原行为；需 pip install gpytorch）：
+% gpytorch : gpbackend
+% 200      : gpiter
+% 0.1      : gplr
 
 % IonDistances   
 1.90 1.85 1.85 1.75

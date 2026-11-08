@@ -41,9 +41,15 @@ def _code_exec_line(ORG, code, step):
     if is_gp_step(ORG, step):
         from gpevo.FunctionFolder.USPEX.src.gp_ml import _ncpu
 
-        return (f"uspexkit gp --n={_ncpu(ORG)} --data={ORG.gpData} "
-                f"--den={ORG.gpDen} --u={ORG.gpU} --k={ORG.gpK} "
-                f"--mode={ORG.gpMode} --optype={ORG.optType}")
+        # The GP step is vendored: no external ``uspexkit`` package is needed
+        # on the compute node.  Keep the same arguments, plus the training
+        # backend options from INPUT.txt.
+        return (f"python -m gpevo.uspexkit.cli gp --n={_ncpu(ORG)} "
+                f"--data={ORG.gpData} --den={ORG.gpDen} --u={ORG.gpU} "
+                f"--k={ORG.gpK} --mode={ORG.gpMode} --optype={ORG.optType} "
+                f"--backend={getattr(ORG, 'gpBackend', 'sklearn')} "
+                f"--iter={getattr(ORG, 'gpTrainingIter', 200)} "
+                f"--lr={getattr(ORG, 'gpLr', 0.1)}")
     cmd = ORG.commandExecutable[step - 1] if len(ORG.commandExecutable) >= step else ""
     cmd = str(cmd or "")
     mapping = {

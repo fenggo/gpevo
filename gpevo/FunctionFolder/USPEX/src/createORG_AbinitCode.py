@@ -14,7 +14,7 @@ from gpevo.FunctionFolder.USPEX.src.gp_ml import csv_rows
 
 # Options of the GP block; `gp` is the switch, the rest only matter when it is on.
 _GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot",
-               "cache", "explore")
+               "cache", "explore", "gpbackend", "gpiter", "gplr")
 
 
 def _nonempty_block(lines):
@@ -235,6 +235,27 @@ def createORG_AbinitCode(inputFile):
     if raw is not None:
         try:
             ORG.gpExplore = 1 if int(float(raw)) != 0 else 0
+        except ValueError:
+            pass
+    raw = p.option("gpbackend")
+    if raw is not None:
+        backend = str(raw).lower()
+        if backend in ("sklearn", "gpytorch"):
+            ORG.gpBackend = backend
+        else:
+            from gpevo.log_utils import console_print
+            console_print(f"  Warning: unknown gpbackend '{raw}', "
+                          "falling back to sklearn")
+    raw = p.option("gpiter")
+    if raw is not None:
+        try:
+            ORG.gpTrainingIter = max(1, int(float(raw)))
+        except ValueError:
+            pass
+    raw = p.option("gplr")
+    if raw is not None:
+        try:
+            ORG.gpLr = float(raw)
         except ValueError:
             pass
 
