@@ -406,7 +406,6 @@ Reproduce with: `python docs/feature_ablation.py --data ~/tnt22/data22`
 | `rotation_operator.md` | The two kinds of rotation (rigid-body vs group torsion), default angles (90° / ±90°·±60°·±30°), `fracRotMut` default 0.1, breathing lattice 10–20% |
 | `swarm_pso_coefficients.md` | Derivation of `swarmInertia` / `swarmCognitive`: stability triangle, constriction factor, order-of-magnitude check and recommended values |
 | `swarm_operator.md` | swarm operator algorithm (per-molecule interpolation toward the current best + orientation quaternion slerp + pbest/inertia), comparison with textbook PSO / MATLAB PSO, suitability for molecular crystals, and the fixes and remaining improvements around cell alignment / MtypeLIST assertions / orientation slerp / pbest inertia state |
-| `uspexkit-gp内核C优化原理与运行机制.pptx` | C optimisation principles of the uspexkit GP kernel |
 
 ## Relationship to the MATLAB version
 

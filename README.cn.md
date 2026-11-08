@@ -404,7 +404,6 @@ example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
 | `rotation_operator.md` | 旋转算子的两类旋转（刚体 vs 基团扭转）、默认角度（90° / ±90°·±60°·±30°）、`fracRotMut` 默认 0.1、呼吸晶格 10–20% |
 | `swarm_pso_coefficients.md` | `swarmInertia` / `swarmCognitive` 的取值推导：稳定三角形、收缩因子、量级核算与推荐值 |
 | `swarm_operator.md` | swarm 算子的算法原理（逐分子向当代最优插值 + 取向四元数 slerp + pbest/惯性）、与教科书 PSO / MATLAB PSO 的对照、对分子晶体的适用性、晶胞对齐 / MtypeLIST 断言 / 取向 slerp / pbest 惯性状态 的修复及剩余改进方向 |
-| `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
 
 ## 与 MATLAB 版的关系
 
