@@ -499,3 +499,33 @@ def test_kernel_init_and_noise_bounds_follow_the_sklearn_kernel():
                           training_iter=5).fit(X, np.sin(X[:, 0]))
     assert m._noise_bounds == (1e-6, 0.05)
     assert float(m._likelihood.noise.item()) <= 0.05
+
+
+def test_writeORG_labels_the_gp_step_gaussianprocess(tmp_path, monkeypatch):
+    """`1 : gp` appends a GP step, not a third GULP relaxation."""
+    from gpevo.runtime import G, struct
+    from gpevo.FunctionFolder.USPEX.src.writeORG import writeORG
+
+    cmd = "mpirun -n 16 gulp< input > output"
+
+    def make_org(gp):
+        n = 3 if gp else 2
+        return struct(
+            varcomp=0, molecule=0, numIons=[8], atomType=[6],
+            latVolume=100.0, numGenerations=50, initialPopSize=30,
+            populationSize=30, abinitioCode=[3] * n, Kresol=[0.0] * n,
+            commandExecutable=[cmd] * (n - 1) + ([""] if gp else [cmd]),
+            gp=gp, platform=0, numParallelCalcs=1, ExternalPressure=None,
+            resFolder=str(tmp_path), log_file="OUTPUT.txt")
+
+    monkeypatch.setitem(G, "ORG_STRUC", make_org(1))
+    rows = [l for l in writeORG().splitlines()
+            if l.startswith(("  1", "  2", "  3"))]
+    assert len(rows) == 3
+    assert "GULP" in rows[0] and "GULP" in rows[1]
+    assert "GaussianProcess" in rows[2] and "GULP" not in rows[2]
+    # The longer label must not push K-resolution out of alignment.
+    assert rows[0].find("0.000") == rows[2].find("0.000")
+
+    monkeypatch.setitem(G, "ORG_STRUC", make_org(0))
+    assert "GaussianProcess" not in writeORG()

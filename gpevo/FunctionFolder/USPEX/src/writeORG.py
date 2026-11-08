@@ -126,10 +126,19 @@ def writeORG():
     else:
         lines.append("Step  Abinitio Code    K-resolution ")
 
+    # Local import: gp_ml owns the definition of "which step is the GP step",
+    # and importing it lazily keeps writeORG free of a module-level cycle.
+    from gpevo.FunctionFolder.USPEX.src.gp_ml import is_gp_step
+
     kresol = list(getattr(ORG, "Kresol", []) or [])
     commands = list(getattr(ORG, "commandExecutable", []) or [])
     for step in range(total):
-        code = ABINITIO_CODES.get(int(codes[step]), None)
+        is_gp = is_gp_step(ORG, step + 1)
+        # `1 : gp` appends a step that reuses the last abinitioCode so the
+        # relaxation input still exists, but runs the GP instead.  Label it
+        # for what it actually does rather than repeating "GULP".
+        code = ("GaussianProcess" if is_gp
+                else ABINITIO_CODES.get(int(codes[step]), None))
         if code is None:
             lines.append("*" * 72)
             lines.append("**      ERROR:    The code you selected is not vaild!             **")
@@ -141,10 +150,15 @@ def writeORG():
             kresol[step] if step < len(kresol) else 0.0
         )
         command = commands[step] if step < len(commands) else ""
+        # ABINITIO_CODES labels are 14 chars; "GaussianProcess" is 15.  Take
+        # that one char back from the adjacent gap so K-resolution stays put.
         if platform == 0:
-            lines.append(f" {step + 1:2d} {code:12s}  {command:36s}  {resolution:12.3f}")
+            command_width = 35 if is_gp else 36
+            lines.append(f" {step + 1:2d} {code:12s}  "
+                         f"{command:{command_width}s}  {resolution:12.3f}")
         else:
-            lines.append(f" {step + 1:2d} {code:12s}  {resolution:12.3f}")
+            gap = " " if is_gp else "  "
+            lines.append(f" {step + 1:2d} {code:12s}{gap}{resolution:12.3f}")
 
     lines.append("")
     lines.append(PLATFORM_TEXT.get(platform, PLATFORM_TEXT[0]))
