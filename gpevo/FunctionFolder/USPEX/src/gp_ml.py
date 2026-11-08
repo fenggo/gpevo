@@ -278,6 +278,7 @@ def run_gp(ORG, cwd=None, id_=None):
         "backend": backend,
         "training_iter": int(_opt(ORG, "gpTrainingIter", 200)),
         "learning_rate": float(_opt(ORG, "gpLr", 0.1)),
+        "log_dir": getattr(ORG, "resFolder", None) or None,
     }
     if id_ is not None:
         kwargs["id_"] = int(id_)
@@ -1127,7 +1128,8 @@ def _gp_active_learning(ORG, POP, fitness):
                         features=features or None,
                         backend=params["backend"],
                         training_iter=int(params["training_iter"]),
-                        learning_rate=float(params["learning_rate"]))
+                        learning_rate=float(params["learning_rate"]),
+                        log_dir=res_folder)
     if not ok or not isinstance(results, dict) or not results:
         console_print("  Warning: uspexkit.pred returned no predictions, "
                       "fitness left unchanged")

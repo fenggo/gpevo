@@ -184,7 +184,7 @@ def get_nmol(atoms):
 
 
 def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,pop=100,ref='results1',id_=None,k=1,mode='ei',optype=11,
-       backend="sklearn",training_iter=200,learning_rate=0.1):
+       backend="sklearn",training_iter=200,learning_rate=0.1,log_dir=None):
     ''' Gaussian Process '''
     write_input(inp='inp-grad',keyword='grad conv qiterative verb')
     run_gulp(n=n,inp='inp-grad')
@@ -236,7 +236,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
 
     gpr_energy, gpr_density = load_gaussian_process(
         X, y, y_eng, backend=backend, training_iter=training_iter,
-        learning_rate=learning_rate)
+        learning_rate=learning_rate, log_dir=log_dir)
     rfr_density = load_rfr(X, y)
     if not exists('gp.csv'):
         with open('gp.csv','w') as fd:
@@ -620,8 +620,49 @@ def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
     return gpr
 
 
+def _write_gp_diagnostics(fl, gpr, X, y, label, backend):
+    """Append the training report for one surrogate to ``gpcsp.log``.
+
+    Everything is read from state the fit already stored; nothing is refitted
+    here, because load_gaussian_process runs once per structure in gp().
+    """
+    print(f"  [{label}] backend={backend}  n_train={X.shape[0]}  "
+          f"n_features={X.shape[1]}", file=fl)
+    info = getattr(gpr, '_fit_info', None)
+    if not info or 'restart_lmls' not in info:
+        return                       # older pickle cache without diagnostics
+    lmls = [v for v in info['restart_lmls'] if v is not None]
+    spread = max(lmls) - min(lmls) if len(lmls) > 1 else 0.0
+    print(f"  restarts={info['n_restarts']}  failed={info['failed_restarts']}  "
+          f"max_iter={info['training_iter']}  "
+          f"best_lbfgs_evals={info['best_evals']}", file=fl)
+    print(f"  restart_LML=[{', '.join(f'{v:.4f}' for v in lmls)}]  "
+          f"spread={spread:.4f}", file=fl)
+    scale_note = (f"  y_std={info['y_std']:.6g}"
+                  if info.get('y_std') else "")
+    print(f"  best_LML={info['best_lml']:.6f}/point "
+          f"(normalised y){scale_note}", file=fl)
+    if 'noise_sigma' not in info:
+        print("  (hyperparameter/fit diagnostics unavailable)", file=fl)
+        return
+    print(f"  noise_sigma={info['noise_sigma']:.6f}  "
+          f"mean_constant={info['mean_constant']:+.6f}  "
+          f"linear_outputscale={info['linear_outputscale']:.6g}  "
+          f"core_outputscale={info['core_outputscale']:.6g}", file=fl)
+    ls = ', '.join(f'{v:.3f}' for v in info['lengthscale'])
+    print(f"  lengthscale(ARD)=[{ls}]", file=fl)
+    print(f"  train_RMSE={info['train_rmse']:.6f}  "
+          f"train_R2={info['train_r2']:.6f}  "
+          f"max|resid|={info['train_max_resid']:.6f}", file=fl)
+    print(f"  train_posterior_sigma_mean="
+          f"{info['train_posterior_sigma_mean']:.6f}", file=fl)
+    print("  LOO_RMSE=n/a (gpytorch backend: no sklearn Cholesky factor)",
+          file=fl)
+
+
 def load_gaussian_process(X, y, y_eng, backend="sklearn",
-                          training_iter=200, learning_rate=0.1):
+                          training_iter=200, learning_rate=0.1,
+                          log_dir=None):
     length_scale = [0.1 for i in range(X.shape[1])]
     # density: Matern 5/2 + linear + noise.  LOO on the training set showed
     # this target is insensitive to the core (RBF is within noise), so the
@@ -652,11 +693,21 @@ def load_gaussian_process(X, y, y_eng, backend="sklearn",
                                   training_iter=training_iter,
                                   learning_rate=learning_rate)
 
-    with open("gpcsp.log", "w") as fl:
+    # The original uspexkit wrote ../<resFolder>/gpcsp.log; the bare relative
+    # path landed in CalcFoldN for gp() and in <data> for pred().  Take the
+    # run's results folder explicitly so both entry points agree.
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "gpcsp.log")
+    else:
+        log_path = "gpcsp.log"
+    with open(log_path, "w") as fl:
         print("density:", gpr_density.kernel_, file=fl)
         print("LML:", gpr_density.log_marginal_likelihood(), file=fl)
+        _write_gp_diagnostics(fl, gpr_density, X, y, "density", backend)
         print("energy:", gpr_energy.kernel_, file=fl)
         print("LML:", gpr_energy.log_marginal_likelihood(), file=fl)
+        _write_gp_diagnostics(fl, gpr_energy, X, y_eng, "energy", backend)
 
     return gpr_energy, gpr_density
 
@@ -683,7 +734,7 @@ def load_rfr(X, y):
 
 def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
          c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None,
-         backend="sklearn",training_iter=200,learning_rate=0.1):
+         backend="sklearn",training_iter=200,learning_rate=0.1,log_dir=None):
     """
     Predict density and energy using Gaussian Process + MLP + RandomForest.
 
@@ -759,7 +810,7 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     X      = scaler.transform(X_raw)
     gpr_energy, gpr_density = load_gaussian_process(
         X, y, y_eng, backend=backend, training_iter=training_iter,
-        learning_rate=learning_rate)
+        learning_rate=learning_rate, log_dir=log_dir or root_dir)
     rfr = load_rfr(X, y)
     chdir(root_dir)
 

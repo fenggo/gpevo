@@ -63,6 +63,8 @@ def _build_parser():
                       help="max L-BFGS iterations per restart (gpytorch)")
     p_gp.add_argument("--lr", dest="learning_rate", type=float, default=0.1,
                       help="L-BFGS learning rate (gpytorch)")
+    p_gp.add_argument("--res-folder", dest="res_folder", default="",
+                      help="run's results<N> directory for gpcsp.log")
     return parser
 
 
@@ -75,7 +77,7 @@ def main(argv=None):
        dat=args.data, ref=args.ref, id_=args.id, k=args.k,
        mode=args.mode, optype=args.optype,
        backend=args.backend, training_iter=args.training_iter,
-       learning_rate=args.learning_rate)
+       learning_rate=args.learning_rate, log_dir=args.res_folder or None)
 
 
 if __name__ == "__main__":

@@ -49,7 +49,8 @@ def _code_exec_line(ORG, code, step):
                 f"--k={ORG.gpK} --mode={ORG.gpMode} --optype={ORG.optType} "
                 f"--backend={getattr(ORG, 'gpBackend', 'sklearn')} "
                 f"--iter={getattr(ORG, 'gpTrainingIter', 200)} "
-                f"--lr={getattr(ORG, 'gpLr', 0.1)}")
+                f"--lr={getattr(ORG, 'gpLr', 0.1)} "
+                f"--res-folder={getattr(ORG, 'resFolder', '') or ''}")
     cmd = ORG.commandExecutable[step - 1] if len(ORG.commandExecutable) >= step else ""
     cmd = str(cmd or "")
     mapping = {

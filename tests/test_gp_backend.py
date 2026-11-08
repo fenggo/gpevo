@@ -92,6 +92,7 @@ def test_run_gp_passes_backend_options(monkeypatch):
     org.gpBackend = "gpytorch"
     org.gpTrainingIter = 50
     org.gpLr = 0.05
+    org.resFolder = "/tmp/results9"
     captured = {}
 
     def fake_call(name, **kwargs):
@@ -108,6 +109,7 @@ def test_run_gp_passes_backend_options(monkeypatch):
     assert captured["training_iter"] == 50
     assert captured["learning_rate"] == 0.05
     assert captured["id_"] == 7
+    assert captured["log_dir"] == "/tmp/results9"
 
 
 # ── fail-fast on a missing optional dependency ──────────────────────────
@@ -228,12 +230,14 @@ def test_code_exec_line_uses_vendored_cli(monkeypatch):
     org.gpBackend = "gpytorch"
     org.gpTrainingIter = 50
     org.gpLr = 0.05
+    org.resFolder = "/tmp/results9"
 
     line = submitJob._code_exec_line(org, None, 1)
     assert line.startswith("python -m gpevo.uspexkit.cli gp ")
     assert "--backend=gpytorch" in line
     assert "--iter=50" in line
     assert "--lr=0.05" in line
+    assert "--res-folder=/tmp/results9" in line
     assert "uspexkit gp " not in line
 
 
@@ -241,10 +245,12 @@ def test_vendored_cli_parser_exposes_backend():
     from gpevo.uspexkit.cli import _build_parser
 
     args = _build_parser().parse_args(
-        ["gp", "--backend=gpytorch", "--iter=50", "--lr=0.05"])
+        ["gp", "--backend=gpytorch", "--iter=50", "--lr=0.05",
+         "--res-folder=/tmp/results2"])
     assert args.backend == "gpytorch"
     assert args.training_iter == 50
     assert args.learning_rate == 0.05
+    assert args.res_folder == "/tmp/results2"
     assert args.command == "gp"
 
 
@@ -277,3 +283,103 @@ def test_gpytorch_regressor_roundtrip():
     assert np.allclose(fit("matern").predict(X[:3]), mu)
     # the energy kernel family is a valid, distinct construction
     assert fit("rbf").predict(X[:3], return_std=True)[1].shape == (3,)
+
+
+def test_gpytorch_fit_scores_restarts_with_the_prior_mll():
+    """The restart score is log p(y|X,theta), not a posterior log-prob.
+
+    Calling model(train_x) in eval mode returns the posterior (and trips
+    GPInputWarning because input == train_inputs).  Feeding that to
+    ExactMarginalLogLikelihood inflates the score used for best_state.
+    """
+    pytest.importorskip("gpytorch")
+    import warnings
+    import torch
+    import gpytorch
+    from gpytorch.utils.warnings import GPInputWarning
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+
+    rng = np.random.default_rng(5)
+    X = rng.normal(size=(10, 3))
+    y = np.sin(X[:, 0]) + 0.05 * rng.normal(size=10)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        m = GPyTorchRegressor(normalize_y=True, random_state=0,
+                              training_iter=5, n_restarts_optimizer=0).fit(X, y)
+    assert not [w for w in caught if issubclass(w.category, GPInputWarning)]
+
+    # Standard GPyTorch idiom: the MLL consumes the prior, so train mode.
+    m._model.train()
+    m._likelihood.train()
+    with torch.no_grad(), gpytorch.settings.cholesky_jitter(m.alpha):
+        expected = gpytorch.mlls.ExactMarginalLogLikelihood(
+            m._likelihood, m._model)(m._model(m._X_train), m._y_train).item()
+    m._model.eval()
+    m._likelihood.eval()
+
+    assert m.log_marginal_likelihood() == pytest.approx(expected, rel=1e-4,
+                                                        abs=1e-5)
+
+
+def test_gpcsp_log_goes_to_the_results_folder(monkeypatch, tmp_path):
+    """The GP report belongs to <resFolder>, not <data> or CalcFoldN."""
+    res = tmp_path / "results2"
+    monkeypatch.chdir(tmp_path)
+
+    info = {
+        'backend': 'gpytorch', 'core': 'matern',
+        'n_train': 12, 'n_features': 3, 'n_restarts': 3, 'training_iter': 5,
+        'restart_lmls': [-1.0, -0.9, -0.8], 'failed_restarts': 0,
+        'best_lml': -0.8, 'best_evals': 21,
+        'y_mean': 1.9, 'y_std': 0.03,
+        'noise_sigma': 0.1, 'mean_constant': 0.0,
+        'linear_outputscale': 0.01, 'core_outputscale': 0.12,
+        'lengthscale': [1.0, 2.0, 3.0],
+        'train_rmse': 0.02, 'train_r2': 0.98,
+        'train_max_resid': 0.05, 'train_posterior_sigma_mean': 0.01,
+    }
+
+    class _StubGPR:
+        kernel_ = "stub-kernel"
+        _fit_info = info
+
+        def log_marginal_likelihood(self):
+            return -0.8
+
+    monkeypatch.setattr(core, "_load_or_fit_gpr", lambda *a, **kw: _StubGPR())
+    core.load_gaussian_process(np.zeros((12, 3)), np.zeros(12), np.zeros(12),
+                               backend="gpytorch", log_dir=str(res))
+
+    log = (res / "gpcsp.log").read_text(encoding="utf-8")
+    assert "LML:" in log                      # original four lines survive
+    assert "backend=gpytorch" in log
+    assert "restart_LML=" in log
+    assert "y_std=0.03" in log
+    assert "train_RMSE=" in log
+    assert "LOO_RMSE=n/a" in log
+    assert not (tmp_path / "gpcsp.log").exists()
+
+
+def test_gpytorch_fit_diagnostics_survive_pickling():
+    """A cache hit reads the pickled model, so the report must travel with it."""
+    pytest.importorskip("gpytorch")
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(10, 3))
+    y = np.sin(X[:, 0]) + 0.05 * rng.normal(size=10)
+    m = GPyTorchRegressor(normalize_y=True, random_state=0,
+                          training_iter=5, n_restarts_optimizer=0).fit(X, y)
+
+    info = m._fit_info
+    assert info["backend"] == "gpytorch"
+    assert info["n_train"] == 10 and info["n_features"] == 3
+    assert info["n_restarts"] == 1 and info["failed_restarts"] == 0
+    assert info["best_evals"] > 0
+    assert len(info["restart_lmls"]) == 1
+    assert info["noise_sigma"] > 0
+    assert len(info["lengthscale"]) == 3
+    assert np.isfinite(info["train_rmse"])
+    assert np.isfinite(info["train_r2"])
+    assert pickle.loads(pickle.dumps(m))._fit_info == info

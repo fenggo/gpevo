@@ -142,6 +142,7 @@ class GPyTorchRegressor:
         self._y_mean = 0.0
         self._y_std = 1.0
         self._lml = None
+        self._fit_info = None     # training diagnostics, filled by fit()
         self._n_features = None
 
     # ── fit ──────────────────────────────────────────────────────────────
@@ -190,6 +191,8 @@ class GPyTorchRegressor:
         model = None
         likelihood = None
         lml_val = float('-inf')
+        restart_info = []
+        best_info = {'evals': 0}
 
         for _ in range(n_restarts):
             kernel = _build_kernel(n_features, self.core)
@@ -209,28 +212,37 @@ class GPyTorchRegressor:
                 tolerance_change=1e-9,
             )
             mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+            state = {'evals': 0}
 
             def _closure():
                 optimizer.zero_grad()
                 output = model(train_x)
                 loss = -mll(output, train_y)
                 loss.backward()
+                state['evals'] += 1
                 return loss
 
             try:
                 with gpytorch.settings.cholesky_jitter(self.alpha):
                     optimizer.step(_closure)
             except Exception:
+                # A failed restart used to vanish silently; keep a trace of it.
+                restart_info.append({'lml': None, 'evals': state['evals'],
+                                     'failed': True})
                 continue
 
-            model.eval()
-            likelihood.eval()
+            # LML must be evaluated in train mode: in eval mode model(train_x)
+            # returns the posterior (and warns, since input == train_inputs),
+            # which inflates the LML and can pick the wrong restart.
             with torch.no_grad(), gpytorch.settings.cholesky_jitter(self.alpha):
                 output = model(train_x)
                 lml_val = mll(output, train_y).item()
 
+            restart_info.append({'lml': lml_val, 'evals': state['evals'],
+                                 'failed': False})
             if lml_val > best_lml:
                 best_lml = lml_val
+                best_info = restart_info[-1]
                 best_state = {
                     'model': {k: v.clone() for k, v in model.state_dict().items()},
                     'likelihood': {k: v.clone()
@@ -258,6 +270,58 @@ class GPyTorchRegressor:
         self.kernel_ = self._model.covar_module
         self._X_train = train_x
         self._y_train = train_y
+
+        # Diagnostics are computed once here and travel with the pickled model,
+        # so a cache hit in core._load_or_fit_gpr costs nothing extra.
+        self._fit_info = {
+            'backend': 'gpytorch',
+            'core': self.core,
+            'n_train': int(n_samples),
+            'n_features': int(n_features),
+            'n_restarts': int(n_restarts),
+            'training_iter': int(self.training_iter),
+            'restart_lmls': [r['lml'] for r in restart_info],
+            'failed_restarts': sum(r['failed'] for r in restart_info),
+            'best_lml': float(best_lml),
+            'best_evals': best_info['evals'],
+            'y_mean': float(self._y_mean),
+            'y_std': float(self._y_std),
+        }
+        try:
+            linear, core_kernel = self.kernel_.kernels
+            # Report the hyperparameters on the ORIGINAL target scale, so they
+            # are comparable with train_RMSE / posterior_sigma below.  LML and
+            # ARD lengthscales stay on the normalised / standardised scales.
+            self._fit_info.update({
+                'noise_sigma': float(self._likelihood.noise.item()) ** 0.5
+                               * self._y_std,
+                'mean_constant': float(self._model.mean_module.constant.item())
+                                 * self._y_std + self._y_mean,
+                'linear_outputscale': float(linear.outputscale.item())
+                                      * self._y_std ** 2,
+                'core_outputscale': float(core_kernel.outputscale.item())
+                                    * self._y_std ** 2,
+                'lengthscale': core_kernel.base_kernel.lengthscale.detach()
+                                .numpy().ravel().tolist(),
+            })
+            # In-sample fit quality.  debug(False) suppresses the legitimate
+            # GPInputWarning raised when predicting at train_inputs.
+            with torch.no_grad(), gpytorch.settings.debug(False), \
+                    gpytorch.settings.cholesky_jitter(self.alpha):
+                posterior = self._model(self._X_train)
+                mu = posterior.mean.numpy() * self._y_std + self._y_mean
+                sd = posterior.stddev.numpy() * self._y_std
+            resid = mu - y
+            ss_tot = float(np.sum((y - y.mean()) ** 2))
+            self._fit_info.update({
+                'train_rmse': float(np.sqrt(np.mean(resid ** 2))),
+                'train_r2': (float(1.0 - np.sum(resid ** 2) / ss_tot)
+                             if ss_tot > 0 else float('nan')),
+                'train_max_resid': float(np.max(np.abs(resid))),
+                'train_posterior_sigma_mean': float(sd.mean()),
+            })
+        except Exception:
+            pass
 
         return self
 
