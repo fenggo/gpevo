@@ -174,7 +174,7 @@ def test_default_backend_still_uses_sklearn_tag(monkeypatch, tmp_path):
         blob = pickle.load(fp)
     assert blob["version"] == core._KERNEL_VERSION == 2
     assert isinstance(blob["model"], _FakeSklearnGPR)
-    assert core._GPYTORCH_VERSION == "gpytorch-1"
+    assert core._GPYTORCH_VERSION == "gpytorch-2"
 
 
 # ── cache isolation between backends ────────────────────────────────────
@@ -313,13 +313,14 @@ def test_gpytorch_fit_scores_restarts_with_the_prior_mll():
     m._model.train()
     m._likelihood.train()
     with torch.no_grad(), gpytorch.settings.cholesky_jitter(m.alpha):
-        expected = gpytorch.mlls.ExactMarginalLogLikelihood(
+        per_point = gpytorch.mlls.ExactMarginalLogLikelihood(
             m._likelihood, m._model)(m._model(m._X_train), m._y_train).item()
     m._model.eval()
     m._likelihood.eval()
 
-    assert m.log_marginal_likelihood() == pytest.approx(expected, rel=1e-4,
-                                                        abs=1e-5)
+    # ExactMLL divides by n; the public API reports the TOTAL, like sklearn.
+    assert m.log_marginal_likelihood() == pytest.approx(per_point * len(y),
+                                                        rel=1e-4, abs=1e-5)
 
 
 def test_gpcsp_log_goes_to_the_results_folder(monkeypatch, tmp_path):
@@ -361,6 +362,24 @@ def test_gpcsp_log_goes_to_the_results_folder(monkeypatch, tmp_path):
     assert not (tmp_path / "gpcsp.log").exists()
 
 
+def test_uspexkit_gp_stays_callable_after_gpytorch_submodule_import():
+    """The gp.py submodule must not shadow core.gp() on the package.
+
+    Importing gpevo.uspexkit.gp (or unpickling a cached GPyTorchRegressor)
+    sets pkg.gp to the module.  _uspexkit_func used to read that attribute and
+    the *second* uspexkit.gp() call raised "'module' object is not callable".
+    """
+    import importlib
+    from gpevo.uspexkit import core
+
+    importlib.import_module("gpevo.uspexkit.gp")
+    func = gp_ml._uspexkit_func("gp")
+    assert func is core.gp
+    assert callable(func)
+    for name in ("pred", "calc"):
+        assert gp_ml._uspexkit_func(name) is getattr(core, name)
+
+
 def test_gpytorch_fit_diagnostics_survive_pickling():
     """A cache hit reads the pickled model, so the report must travel with it."""
     pytest.importorskip("gpytorch")
@@ -383,3 +402,100 @@ def test_gpytorch_fit_diagnostics_survive_pickling():
     assert np.isfinite(info["train_rmse"])
     assert np.isfinite(info["train_r2"])
     assert pickle.loads(pickle.dumps(m))._fit_info == info
+
+
+def test_gpytorch_restarts_use_different_initialisations():
+    """n_restarts_optimizer used to replay one fixed init N times."""
+    pytest.importorskip("gpytorch")
+    from gpevo.uspexkit.gp import (_build_kernel, _kernel_init, _sample_init,
+                                   GPyTorchRegressor)
+
+    init = _kernel_init(None, 3)
+    rng = np.random.default_rng(0)
+    a, b = _sample_init(init, rng), _sample_init(init, rng)
+    assert a['linear_scale'] != b['linear_scale']
+    assert a['core_scale'] != b['core_scale']
+    assert not np.allclose(a['lengthscale'], b['lengthscale'])
+    assert a['noise'] != b['noise']
+    ka, kb = _build_kernel(3, init=a), _build_kernel(3, init=b)
+    assert not np.allclose(
+        ka.kernels[1].base_kernel.lengthscale.detach().numpy(),
+        kb.kernels[1].base_kernel.lengthscale.detach().numpy())
+
+    X = np.random.default_rng(1).normal(size=(12, 3))
+    m = GPyTorchRegressor(normalize_y=True, random_state=0, training_iter=5,
+                          n_restarts_optimizer=3).fit(X, np.sin(X[:, 0]))
+    assert len(m._fit_info['restart_lmls']) == 4
+    assert m._fit_info['best_lml'] == max(m._fit_info['restart_lmls'])
+
+
+def test_gpytorch_fit_raises_when_every_restart_fails(monkeypatch):
+    pytest.importorskip("gpytorch")
+    import torch
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+
+    def boom(self, closure):
+        raise RuntimeError("cholesky failed")
+    monkeypatch.setattr(torch.optim.LBFGS, "step", boom)
+
+    X = np.random.default_rng(2).normal(size=(10, 3))
+    with pytest.raises(RuntimeError, match="all 2 L-BFGS restart"):
+        GPyTorchRegressor(normalize_y=True, training_iter=5,
+                          n_restarts_optimizer=1).fit(X, np.sin(X[:, 0]))
+
+
+def test_gpytorch_predict_accepts_a_single_1d_row():
+    pytest.importorskip("gpytorch")
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+
+    X = np.random.default_rng(3).normal(size=(10, 3))
+    m = GPyTorchRegressor(normalize_y=True, random_state=0,
+                          training_iter=5).fit(X, np.sin(X[:, 0]))
+    mu2, sd2 = m.predict(X[:1], return_std=True)
+    mu1, sd1 = m.predict(X[0], return_std=True)
+    assert np.allclose(mu1, mu2) and np.allclose(sd1, sd2)
+
+
+def test_fit_rejects_1d_X():
+    pytest.importorskip("gpytorch")
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+    with pytest.raises(ValueError, match="2-D"):
+        GPyTorchRegressor().fit(np.zeros(3), np.zeros(3))
+
+
+def test_log_marginal_likelihood_rejects_theta():
+    pytest.importorskip("gpytorch")
+    from gpevo.uspexkit.gp import GPyTorchRegressor
+
+    X = np.random.default_rng(4).normal(size=(10, 3))
+    m = GPyTorchRegressor(normalize_y=True, training_iter=5).fit(
+        X, np.sin(X[:, 0]))
+    with pytest.raises(NotImplementedError):
+        m.log_marginal_likelihood(theta=np.zeros(3))
+
+
+def test_kernel_init_and_noise_bounds_follow_the_sklearn_kernel():
+    pytest.importorskip("gpytorch")
+    import gpytorch
+    from sklearn.gaussian_process.kernels import (DotProduct, Matern,
+                                                  WhiteKernel)
+    from gpevo.uspexkit.gp import (_kernel_init, _new_likelihood,
+                                   GPyTorchRegressor)
+
+    k = (0.00581 ** 2 * DotProduct(sigma_0=0.412)
+         + 0.35 ** 2 * Matern(length_scale=[0.7, 0.7, 0.7], nu=2.5)
+         + WhiteKernel(noise_level=0.02,
+                       noise_level_bounds=(1e-6, 0.05)))
+    init = _kernel_init(k, 3)
+    assert np.allclose(init['lengthscale'], [0.7, 0.7, 0.7])
+    assert init['noise'] == 0.02
+    assert init['bounds']['noise'] == (1e-6, 0.05)
+    assert isinstance(_new_likelihood(init['bounds']['noise'])
+                      .noise_covar.raw_noise_constraint,
+                      gpytorch.constraints.Interval)
+
+    X = np.random.default_rng(5).normal(size=(10, 3))
+    m = GPyTorchRegressor(kernel=k, normalize_y=True, random_state=0,
+                          training_iter=5).fit(X, np.sin(X[:, 0]))
+    assert m._noise_bounds == (1e-6, 0.05)
+    assert float(m._likelihood.noise.item()) <= 0.05

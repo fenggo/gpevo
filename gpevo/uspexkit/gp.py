@@ -20,6 +20,11 @@ with observation noise handled by a ``GaussianLikelihood``.  ``core`` selects
 between the Matern (density) and RBF (energy) variants so the two surrogate
 models keep the same kernel families as the default sklearn backend.
 
+Initial hyperparameters, their bounds and the noise constraint are read from
+the sklearn kernel passed in, so edits to ``core.py``'s kernel carry over to
+this backend.  DotProduct's ``sigma_0`` has no counterpart in gpytorch's
+LinearKernel and is deliberately not mapped.
+
 Importing this module never imports torch/gpytorch into the sklearn hot path:
 ``core.py`` imports ``GPyTorchRegressor`` lazily, inside the gpytorch branch.
 """
@@ -37,6 +42,16 @@ except ImportError:                                   # pragma: no cover
     _HAS_GPYTORCH = False
 
 
+# Used only when no sklearn kernel is supplied (e.g. direct unit tests).
+_DEFAULT_NOISE = 0.031
+_DEFAULT_BOUNDS = {
+    'linear_scale': (1e-6, 1e-1),
+    'core_scale': (1e-3, 1e1),
+    'lengthscale': (1e-2, 1e2),
+    'noise': (1e-8, 1e-1),
+}
+
+
 def _require_gpytorch():
     if not _HAS_GPYTORCH:
         raise RuntimeError(
@@ -44,15 +59,95 @@ def _require_gpytorch():
             "`pip install gpytorch` (or `pip install gpevo[gpytorch]`).")
 
 
-def _new_likelihood():
-    """Likelihood with the same noise constraint used while fitting."""
-    return gpytorch.likelihoods.GaussianLikelihood(
-        noise_constraint=gpytorch.constraints.GreaterThan(1e-8))
+def _log_bounds(bounds, cap):
+    """Finite, positive, capped (lo, hi) suitable for log-uniform sampling."""
+    try:
+        lo, hi = float(bounds[0]), float(bounds[1])
+    except (TypeError, ValueError, IndexError):
+        return cap
+    if not (np.isfinite(lo) and np.isfinite(hi) and 0 < lo < hi):
+        return cap
+    lo, hi = max(lo, cap[0]), min(hi, cap[1])
+    return (lo, hi) if lo < hi else cap
+
+
+def _kernel_init(sklearn_kernel, n_features):
+    """Initial hyperparameters and sampling bounds from the sklearn kernel.
+
+    The composite kernel is walked by duck typing so this module never has to
+    import sklearn's kernel classes.  ``constant_value``s are collected in
+    ``get_params(deep=True)`` order: linear term first, non-linear term second.
+    """
+    init = {
+        'linear_scale': 0.00581 ** 2,
+        'core_scale': 0.35 ** 2,
+        'lengthscale': np.full(n_features, 0.1, dtype=float),
+        'noise': _DEFAULT_NOISE,
+        'bounds': {k: tuple(v) for k, v in _DEFAULT_BOUNDS.items()},
+    }
+    if sklearn_kernel is None:
+        return init
+
+    objects = [sklearn_kernel]
+    try:
+        objects += [v for v in sklearn_kernel.get_params(deep=True).values()
+                    if hasattr(v, 'get_params')]
+    except Exception:
+        pass
+
+    constants = []
+    for obj in objects:
+        if hasattr(obj, 'noise_level'):
+            init['noise'] = float(obj.noise_level)
+            init['bounds']['noise'] = _log_bounds(
+                getattr(obj, 'noise_level_bounds', None),
+                _DEFAULT_BOUNDS['noise'])
+        if hasattr(obj, 'length_scale'):
+            try:
+                ls = np.asarray(obj.length_scale, dtype=float).ravel()
+                init['lengthscale'] = (np.full(n_features, ls[0])
+                                       if ls.size == 1
+                                       else np.resize(ls, n_features))
+            except (TypeError, ValueError):
+                pass
+            init['bounds']['lengthscale'] = _log_bounds(
+                getattr(obj, 'length_scale_bounds', None),
+                _DEFAULT_BOUNDS['lengthscale'])
+        if hasattr(obj, 'constant_value'):
+            constants.append(float(obj.constant_value))
+    if len(constants) >= 2:
+        init['linear_scale'], init['core_scale'] = constants[0], constants[1]
+    return init
+
+
+def _sample_init(init, rng):
+    """One log-uniform restart.  Restart 0 keeps the nominal initialisation."""
+    out = {}
+    for key in ('linear_scale', 'core_scale', 'noise'):
+        lo, hi = init['bounds'][key]
+        out[key] = float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
+    lo, hi = init['bounds']['lengthscale']
+    out['lengthscale'] = np.exp(
+        rng.uniform(np.log(lo), np.log(hi), size=len(init['lengthscale'])))
+    # Interval.inverse_transform is undefined exactly at a bound.
+    nlo, nhi = init['bounds']['noise']
+    out['noise'] = min(max(out['noise'], nlo * 1.01), nhi * 0.99)
+    return out
+
+
+def _new_likelihood(noise_bounds=None):
+    """Likelihood whose noise constraint matches the sklearn WhiteKernel."""
+    if noise_bounds is None:
+        constraint = gpytorch.constraints.GreaterThan(1e-8)
+    else:
+        lo, hi = noise_bounds
+        constraint = gpytorch.constraints.Interval(lo, hi)
+    return gpytorch.likelihoods.GaussianLikelihood(noise_constraint=constraint)
 
 
 # ── kernel builder ──────────────────────────────────────────────────────────
 
-def _build_kernel(n_features: int, core: str = "matern"):
+def _build_kernel(n_features: int, core: str = "matern", init=None):
     """Build the gpytorch equivalent of the uspexkit composite kernel.
 
     ``core="rbf"`` uses RBFKernel (the energy model), otherwise MaternKernel
@@ -60,15 +155,17 @@ def _build_kernel(n_features: int, core: str = "matern"):
     """
     _require_gpytorch()
     linear = gpytorch.kernels.ScaleKernel(gpytorch.kernels.LinearKernel())
-    linear.outputscale = 0.00581 ** 2
+    linear.outputscale = init['linear_scale'] if init else 0.00581 ** 2
 
     if core == "rbf":
         base = gpytorch.kernels.RBFKernel(ard_num_dims=n_features)
     else:
         base = gpytorch.kernels.MaternKernel(nu=2.5, ard_num_dims=n_features)
     core_kernel = gpytorch.kernels.ScaleKernel(base)
-    core_kernel.outputscale = 0.35 ** 2
-    core_kernel.base_kernel.lengthscale = 0.1        # broadcast to all dims
+    core_kernel.outputscale = init['core_scale'] if init else 0.35 ** 2
+    core_kernel.base_kernel.lengthscale = (
+        np.asarray(init['lengthscale']).reshape(1, -1)
+        if init else 0.1)
 
     return linear + core_kernel
 
@@ -99,20 +196,26 @@ class GPyTorchRegressor:
     with the public API uspexkit consumes.  ``training_iter`` and
     ``learning_rate`` are exposed through INPUT.txt (``gpiter`` / ``gplr``).
 
+    Unlike sklearn, ``log_marginal_likelihood()`` reports the TOTAL log marginal
+    likelihood (sklearn's convention), not GPyTorch's per-point average.
+    Passing ``theta`` is not supported and raises NotImplementedError.
+
     Parameters
     ----------
     kernel : sklearn kernel, optional
-        Accepted for API compatibility; the equivalent gpytorch kernel is
-        always built internally.  The WhiteKernel ``noise_level`` is used as
-        the initial likelihood noise when available.
+        Supplies the initial hyperparameters and their bounds.  When None the
+        nominal uspexkit values are used.
     n_restarts_optimizer : int, default=0
-        Number of L-BFGS restarts with different initialisations.
+        Number of extra L-BFGS restarts.  Restart 0 uses the nominal
+        initialisation; the rest draw log-uniform hyperparameters from the
+        kernel bounds using ``random_state``.
     alpha : float, default=1e-10
         Jitter added to the diagonal for numerical stability.
     normalize_y : bool, default=False
         Centre and scale *y* before fitting; predictions are un-scaled.
     random_state : int, optional
-        Seeds torch so repeated fits are reproducible (sklearn uses 0).
+        Seeds an independent RNG for the restart draws; the global torch RNG
+        is left untouched.
     training_iter : int, default=200
         Max L-BFGS iterations per restart.
     learning_rate : float, default=0.1
@@ -144,15 +247,17 @@ class GPyTorchRegressor:
         self._lml = None
         self._fit_info = None     # training diagnostics, filled by fit()
         self._n_features = None
+        self._noise_bounds = None
 
     # ── fit ──────────────────────────────────────────────────────────────
 
     def fit(self, X, y):
         _require_gpytorch()
-        if self.random_state is not None:
-            torch.manual_seed(self.random_state)
-
         X = np.asarray(X, dtype=np.float64)
+        if X.ndim != 2:
+            raise ValueError(
+                f"X must be a 2-D array of shape (n_samples, n_features), "
+                f"got {X.shape}")
         y = np.asarray(y, dtype=np.float64).ravel()
 
         n_samples, n_features = X.shape
@@ -173,31 +278,25 @@ class GPyTorchRegressor:
         train_x = torch.tensor(X, dtype=torch.float64)
         train_y = torch.tensor(y_proc, dtype=torch.float64)
 
-        # --- initial noise guess (from sklearn WhiteKernel if available) ---
-        init_noise = 0.031
-        if self._sklearn_kernel is not None:
-            try:
-                for k in [self._sklearn_kernel.k1, self._sklearn_kernel.k2]:
-                    if hasattr(k, 'noise_level'):
-                        init_noise = float(k.noise_level)
-                        break
-            except Exception:
-                pass
+        # --- initial hyperparameters, from the sklearn kernel when available ---
+        init = _kernel_init(self._sklearn_kernel, n_features)
+        self._noise_bounds = init['bounds']['noise']
+        rng = np.random.default_rng(self.random_state)
 
         # --- multiple restarts ---
         n_restarts = max(1, self.n_restarts_optimizer + 1)
         best_lml = -float('inf')
         best_state = None
-        model = None
-        likelihood = None
-        lml_val = float('-inf')
+        last_error = None
         restart_info = []
         best_info = {'evals': 0}
 
-        for _ in range(n_restarts):
-            kernel = _build_kernel(n_features, self.core)
-            likelihood = _new_likelihood()
-            likelihood.noise = init_noise
+        for restart in range(n_restarts):
+            spec = init if restart == 0 else _sample_init(init, rng)
+            kernel = _build_kernel(n_features, self.core, init=spec)
+            likelihood = _new_likelihood(self._noise_bounds)
+            nlo, nhi = self._noise_bounds
+            likelihood.noise = min(max(spec['noise'], nlo * 1.01), nhi * 0.99)
 
             model = _ExactGP(train_x, train_y, likelihood, kernel)
             model.train()
@@ -225,18 +324,20 @@ class GPyTorchRegressor:
             try:
                 with gpytorch.settings.cholesky_jitter(self.alpha):
                     optimizer.step(_closure)
-            except Exception:
-                # A failed restart used to vanish silently; keep a trace of it.
+            except Exception as exc:
+                # Keep a trace: a failed restart used to vanish silently.
+                last_error = exc
                 restart_info.append({'lml': None, 'evals': state['evals'],
                                      'failed': True})
                 continue
 
             # LML must be evaluated in train mode: in eval mode model(train_x)
             # returns the posterior (and warns, since input == train_inputs),
-            # which inflates the LML and can pick the wrong restart.
+            # which inflates the LML and can pick the wrong restart.  GPyTorch
+            # divides by n_samples; store the TOTAL to match sklearn.
             with torch.no_grad(), gpytorch.settings.cholesky_jitter(self.alpha):
                 output = model(train_x)
-                lml_val = mll(output, train_y).item()
+                lml_val = mll(output, train_y).item() * n_samples
 
             restart_info.append({'lml': lml_val, 'evals': state['evals'],
                                  'failed': False})
@@ -250,15 +351,14 @@ class GPyTorchRegressor:
                 }
 
         if best_state is None:
-            best_lml = lml_val
-            best_state = {
-                'model': {k: v.clone() for k, v in model.state_dict().items()},
-                'likelihood': {k: v.clone()
-                               for k, v in likelihood.state_dict().items()},
-            }
+            raise RuntimeError(
+                f"GPyTorchRegressor.fit: all {n_restarts} L-BFGS restart(s) "
+                f"failed (last error: {type(last_error).__name__}: "
+                f"{last_error}). Check the training set for NaN/duplicate "
+                f"rows or increase alpha.")
 
         kernel = _build_kernel(n_features, self.core)
-        likelihood = _new_likelihood()
+        likelihood = _new_likelihood(self._noise_bounds)
         self._model = _ExactGP(train_x, train_y, likelihood, kernel)
         self._model.load_state_dict(best_state['model'])
         self._likelihood = likelihood
@@ -270,10 +370,16 @@ class GPyTorchRegressor:
         self.kernel_ = self._model.covar_module
         self._X_train = train_x
         self._y_train = train_y
+        self._fit_info = self._collect_fit_info(
+            y, n_samples, n_features, n_restarts, restart_info, best_info)
+        return self
 
-        # Diagnostics are computed once here and travel with the pickled model,
-        # so a cache hit in core._load_or_fit_gpr costs nothing extra.
-        self._fit_info = {
+    # ── diagnostics ──────────────────────────────────────────────────────
+
+    def _collect_fit_info(self, y, n_samples, n_features, n_restarts,
+                          restart_info, best_info):
+        """Cheap, once-per-fit report; travels with the pickled model."""
+        info = {
             'backend': 'gpytorch',
             'core': self.core,
             'n_train': int(n_samples),
@@ -282,17 +388,17 @@ class GPyTorchRegressor:
             'training_iter': int(self.training_iter),
             'restart_lmls': [r['lml'] for r in restart_info],
             'failed_restarts': sum(r['failed'] for r in restart_info),
-            'best_lml': float(best_lml),
+            'best_lml': float(self._lml),
             'best_evals': best_info['evals'],
             'y_mean': float(self._y_mean),
             'y_std': float(self._y_std),
         }
         try:
             linear, core_kernel = self.kernel_.kernels
-            # Report the hyperparameters on the ORIGINAL target scale, so they
-            # are comparable with train_RMSE / posterior_sigma below.  LML and
-            # ARD lengthscales stay on the normalised / standardised scales.
-            self._fit_info.update({
+            # Report hyperparameters on the ORIGINAL target scale so they are
+            # comparable with train_RMSE / posterior_sigma.  LML is on the
+            # normalised y scale; ARD lengthscales are on standardised X.
+            info.update({
                 'noise_sigma': float(self._likelihood.noise.item()) ** 0.5
                                * self._y_std,
                 'mean_constant': float(self._model.mean_module.constant.item())
@@ -302,34 +408,35 @@ class GPyTorchRegressor:
                 'core_outputscale': float(core_kernel.outputscale.item())
                                     * self._y_std ** 2,
                 'lengthscale': core_kernel.base_kernel.lengthscale.detach()
-                                .numpy().ravel().tolist(),
+                                .cpu().numpy().ravel().tolist(),
             })
             # In-sample fit quality.  debug(False) suppresses the legitimate
             # GPInputWarning raised when predicting at train_inputs.
             with torch.no_grad(), gpytorch.settings.debug(False), \
                     gpytorch.settings.cholesky_jitter(self.alpha):
                 posterior = self._model(self._X_train)
-                mu = posterior.mean.numpy() * self._y_std + self._y_mean
-                sd = posterior.stddev.numpy() * self._y_std
+                mu = posterior.mean.cpu().numpy() * self._y_std + self._y_mean
+                sd = posterior.stddev.cpu().numpy() * self._y_std
             resid = mu - y
             ss_tot = float(np.sum((y - y.mean()) ** 2))
-            self._fit_info.update({
+            info.update({
                 'train_rmse': float(np.sqrt(np.mean(resid ** 2))),
                 'train_r2': (float(1.0 - np.sum(resid ** 2) / ss_tot)
                              if ss_tot > 0 else float('nan')),
                 'train_max_resid': float(np.max(np.abs(resid))),
                 'train_posterior_sigma_mean': float(sd.mean()),
             })
-        except Exception:
-            pass
-
-        return self
+        except Exception as exc:
+            info['diagnostics_error'] = f'{type(exc).__name__}: {exc}'
+        return info
 
     # ── predict ──────────────────────────────────────────────────────────
 
     def predict(self, X, return_std=False):
         _require_gpytorch()
-        X = np.asarray(X, dtype=np.float64)
+        # A 1-D row means one sample; ExactGP.__call__ would otherwise treat
+        # (n_features,) as n_features one-dimensional samples.
+        X = np.atleast_2d(np.asarray(X, dtype=np.float64))
         test_x = torch.tensor(X, dtype=torch.float64)
 
         self._model.eval()
@@ -338,8 +445,8 @@ class GPyTorchRegressor:
         with torch.no_grad(), gpytorch.settings.fast_pred_var(), \
              gpytorch.settings.cholesky_jitter(self.alpha):
             posterior = self._model(test_x)
-            mean = posterior.mean.numpy()
-            std = posterior.stddev.numpy()
+            mean = posterior.mean.cpu().numpy()
+            std = posterior.stddev.cpu().numpy()
 
         # un-normalise
         mean = mean * self._y_std + self._y_mean
@@ -352,6 +459,10 @@ class GPyTorchRegressor:
     # ── score / LML ──────────────────────────────────────────────────────
 
     def log_marginal_likelihood(self, theta=None):
+        if theta is not None:
+            raise NotImplementedError(
+                "GPyTorchRegressor evaluates the marginal likelihood only at "
+                "the fitted hyperparameters; theta is not supported.")
         if self._lml is None:
             raise RuntimeError('Model has not been fitted yet.')
         return self._lml
@@ -398,15 +509,13 @@ class GPyTorchRegressor:
 
         if model_state is not None and self._n_features is not None:
             _require_gpytorch()
+            if X_np is None or y_np is None:
+                raise RuntimeError(
+                    "pickled GPyTorchRegressor has no training data; refit it")
             kernel = _build_kernel(self._n_features, self.core)
-            likelihood = _new_likelihood()
-
-            if X_np is not None:
-                train_x = torch.tensor(X_np, dtype=torch.float64)
-                train_y = torch.tensor(y_np, dtype=torch.float64)
-            else:
-                train_x = torch.zeros(1, self._n_features, dtype=torch.float64)
-                train_y = torch.zeros(1, dtype=torch.float64)
+            likelihood = _new_likelihood(getattr(self, '_noise_bounds', None))
+            train_x = torch.tensor(X_np, dtype=torch.float64)
+            train_y = torch.tensor(y_np, dtype=torch.float64)
 
             self._model = _ExactGP(train_x, train_y, likelihood, kernel)
             self._model.load_state_dict(model_state)

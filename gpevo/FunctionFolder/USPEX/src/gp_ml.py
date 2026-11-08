@@ -172,15 +172,22 @@ def _pick_by_fitness(entries, fitness, nboot):
 def _uspexkit_func(name):
     """Return the ``uspexkit.<name>`` callable from the vendored ``gpevo.uspexkit``.
 
-    Returns None when the package or the function is unavailable.  uspexkit is
-    bundled with GPEvo (``gpevo/uspexkit``), so there is no standalone fallback.
+    Resolve from ``core`` first.  ``gpevo/uspexkit/gp.py`` is a submodule whose
+    name collides with ``core.gp()``: importing it (the gpytorch branch, or
+    unpickling a cached GPyTorchRegressor) sets ``pkg.gp`` to the *module*,
+    shadowing the PEP-562 ``__getattr__`` in ``__init__.py``.  A second
+    uspexkit.gp() call then fails with "'module' object is not callable".
     """
     try:
-        from gpevo import uspexkit as _pkg
+        from gpevo.uspexkit import core as _core
     except Exception as exc:
         console_print(f"  Warning: gpevo.uspexkit is not importable ({exc})")
         return None
-    func = getattr(_pkg, name, None)
+    func = getattr(_core, name, None)
+    if func is None:
+        # Names __init__.py maps to other modules (denevo, smd, md2pdf).
+        from gpevo import uspexkit as _pkg
+        func = getattr(_pkg, name, None)
     if func is None:
         console_print(f"  Warning: gpevo.uspexkit.{name} is not available")
     return func

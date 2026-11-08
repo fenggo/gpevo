@@ -254,7 +254,8 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
 
 `gpevo/uspexkit/core.py` 的 `load_gaussian_process` 拿全表行直接拟合，无离群点过滤、无重复行检查、
 无运行内的 held-out 校验；超参缓存按后端区分 version 标记（sklearn 保持 `_KERNEL_VERSION=2`，
-`gpbackend : gpytorch` 用 `_GPYTORCH_VERSION="gpytorch-1"`，切换后端必然重训；数据增长由
+`gpbackend : gpytorch` 用 `_GPYTORCH_VERSION="gpytorch-2"`（v2 起噪声约束改为与 sklearn
+一致的 `Interval`、LML 改为总和，v1 的 `raw_noise` 语义不同、缓存必须重训），切换后端必然重训；数据增长由
 `gp_ml.py:_invalidate_pkl` 负责丢弃，`rfr.pkl` 也在 `_PKL_NAMES` 里，这一点是对的）。
 `gp_ml.py:_log_learning_curve` 会报 LOO RMSE，但只在缓存模型存在时。
 

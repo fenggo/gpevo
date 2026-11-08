@@ -585,7 +585,11 @@ _KERNEL_VERSION = 2
 # Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag at 2
 # means switching backends always refits, without invalidating existing
 # sklearn caches.
-_GPYTORCH_VERSION = "gpytorch-1"
+# v2: the likelihood noise constraint became an Interval (matching sklearn's
+# noise_level_bounds) and log_marginal_likelihood() now reports the TOTAL LML.
+# A v1 raw_noise tensor is not interchangeable with a v2 one, so old caches
+# must refit rather than load a silently mis-scaled model.
+_GPYTORCH_VERSION = "gpytorch-2"
 
 
 def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
@@ -640,10 +644,14 @@ def _write_gp_diagnostics(fl, gpr, X, y, label, backend):
           f"spread={spread:.4f}", file=fl)
     scale_note = (f"  y_std={info['y_std']:.6g}"
                   if info.get('y_std') else "")
-    print(f"  best_LML={info['best_lml']:.6f}/point "
-          f"(normalised y){scale_note}", file=fl)
+    print(f"  best_LML={info['best_lml']:.6f} (total, normalised y)"
+          f"{scale_note}", file=fl)
     if 'noise_sigma' not in info:
-        print("  (hyperparameter/fit diagnostics unavailable)", file=fl)
+        if info.get('diagnostics_error'):
+            print(f"  diagnostics unavailable: {info['diagnostics_error']}",
+                  file=fl)
+        else:
+            print("  (hyperparameter/fit diagnostics unavailable)", file=fl)
         return
     print(f"  noise_sigma={info['noise_sigma']:.6f}  "
           f"mean_constant={info['mean_constant']:+.6f}  "
