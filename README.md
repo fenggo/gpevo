@@ -1,115 +1,114 @@
-# GPEvo
-
-**GPEvo** 是 USPEX-GP（基于 USPEX-9.4.4）分子晶体结构预测路径（`calculationType=310`）的纯 Python 实现，内置高斯过程（GP）引导的主动学习。不需要 MATLAB / OCTAVE，从 `INPUT.txt` 和分子模板直接运行。
-
 ![GPEvo](docs/assets/lockup-wave-light.svg)
+**GPEvo** is a pure-Python implementation of the USPEX-GP (based on USPEX-9.4.4) molecular crystal structure prediction workflow, with Gaussian-process (GP) guided active learning built in.
 
-| 项目 | 说明 |
+| Item | Description |
 |---|---|
-| 上游项目 | [USPEX](https://uspex-team.org)（MATLAB 原版 `uspex-gp`） |
-| 本仓库 | <https://gitee.com/fenggo/gpevo> |
-| 许可 | MIT，见 [LICENSE](LICENSE) |
+| Upstream project | [USPEX](https://uspex-team.org) (the GP-enabled `uspex-gp` variant) |
+| This repository | <https://github.com/fenggo/gpevo> |
+| License | MIT, see [LICENSE](LICENSE) |
 
-## 目录
+> Chinese version: [README.cn.md](README.cn.md).
 
-- [功能概览](#功能概览)
-- [安装](#安装)
-- [快速开始](#快速开始)
-- [运行与输出](#运行与输出)
-  - [输出文件一览](#输出文件一览)
-  - [`Individuals.traj`](#individualsla_traj)
+## Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Running and output](#running-and-output)
+  - [Output files](#output-files)
+  - [`Individuals.traj`](#individualstraj)
   - [`origin`](#origin)
-- [INPUT.txt 扩展选项](#inputtxt-扩展选项)
-  - [GP 主动学习](#gp-主动学习)
-  - [swarm 算子（可选）](#swarm-算子可选)
-  - [强化学习算子/参数优化（可选）](#强化学习算子参数优化可选)
-- [分析与绘图工具](#分析与绘图工具)
-- [目录结构](#目录结构)
-- [设计文档](#设计文档)
-- [与 MATLAB 版的关系](#与-matlab-版的关系)
+- [INPUT.txt extensions](#inputtxt-extensions)
+  - [GP active learning](#gp-active-learning)
+  - [swarm operator (optional)](#swarm-operator-optional)
+  - [Reinforcement-learning operators / parameter tuning (optional)](#reinforcement-learning-operators--parameter-tuning-optional)
+- [Analysis and plotting tools](#analysis-and-plotting-tools)
+- [Directory layout](#directory-layout)
+- [Design documents](#design-documents)
+- [Relationship to the MATLAB version](#relationship-to-the-matlab-version)
 
 ---
 
-## 功能概览
+## Overview
 
-- **分子晶体进化搜索（310）**：heredity / random / softmutation / permutation / latmutation / rotmutation 全部遗传算子 + 精英保留，与 MATLAB 版同一套流程；另含一个可选的 **swarm 算子**（分子感知刚体移动，见 [swarm 算子](#swarm-算子可选)）。
-- **GP 主动学习**：每个结构经 `uspexkit.gp()` 预测密度/能量与不确定度；训练集**自动生长**——第一代结束时用参考方法给最优的若干个结构打标签建立数据库，之后每代按 EI（或不确定度/随机）选 top-K 打标签追加进训练集、失效模型缓存后重训、重预测，再回写适应度。
-- **对称性与随机结构生成**：230 个空间群的 Wyckoff 展开，`random_cell_mol` 的 Cython 移植（`pip install .` 时自动编译）。
-- **分子合法性检查**：`newMolCheck` 的原子对距离扫描也有 Cython 内核（`molcheck_cy.pyx`），8 分子体系约 85× 加速；扩展未编译时自动回退到纯 numpy 实现。
-- **集群提交**：本地子进程与远程调度器两条路径，MPI 环境变量自动处理。
-- **GP 训练集自举**：不需要预先准备 `feature_mlp.csv` / `feature.csv` / `structures.traj`，空目录（甚至不存在的目录）会在第一代结束时自动建起来。
-- **自动绘图**：每代评估完成后，在 `results*/` 生成四面板 GP 状态图（`gp_gen*.png`）。
-- **结果对比工具**：`compare_runs.py` 多运行目录的密度/能量分布对比，`plot_dft.py` DFT 结果绘图。
+- **Molecular-crystal evolutionary search (310)**: all the variation operators — heredity / random / softmutation / permutation / latmutation / rotmutation — plus elitism, following the same pipeline as the MATLAB version; also an optional **swarm operator** (molecule-aware rigid-body moves, see [swarm operator](#swarm-operator-optional)).
+- **GP active learning**: every structure gets density/energy predictions and uncertainties from `uspexkit.gp()`; the training set **grows automatically** — at the end of generation 1 the best few structures are labelled by the reference method to build the database, and from then on each generation picks top-K by EI (or uncertainty / random), labels them and appends them to the training set, invalidates the model cache, retrains, re-predicts, and writes the new fitness back.
+- **Symmetry and random structure generation**: Wyckoff expansions for all 230 space groups, with a Cython port of `random_cell_mol` (compiled automatically by `pip install .`).
+- **Molecule validity checks**: `newMolCheck`'s atom-pair distance scan also has a Cython kernel (`molcheck_cy.pyx`), about 85× faster on an 8-molecule system; it falls back to a pure-numpy implementation when the extension is not built.
+- **Cluster submission**: two paths, local subprocesses and remote schedulers, with MPI environment variables handled automatically.
+- **GP training-set bootstrap**: no need to prepare `feature_mlp.csv` / `feature.csv` / `structures.traj` up front — an empty (or even non-existent) directory is created automatically at the end of generation 1.
+- **Automatic plotting**: after each generation is evaluated, a four-panel GP status figure (`gp_gen*.png`) is written under `results*/`.
+- **Result comparison tools**: `compare_runs.py` compares density/energy distributions across run directories, and `plot_dft.py` plots DFT results.
 
-## 安装
+## Installation
 
-依赖：Python ≥ 3.9，以及 numpy / scipy / networkx / spglib；编译 Cython 扩展需要一个 C 编译器（GCC 即可）。
+Requirements: Python ≥ 3.9 plus numpy / scipy / networkx / spglib; building the Cython extensions needs a C compiler (GCC is fine).
 
 ```bash
-git clone https://gitee.com/fenggo/gpevo.git
+git clone https://github.com/fenggo/gpevo.git
 cd gpevo
-pip install .                          # 有网络（构建隔离自动拉取 setuptools/cython）
-pip install . --no-build-isolation     # 离线，用本机已有的 setuptools + Cython
+pip install .                          # with network access (build isolation pulls setuptools/cython)
+pip install . --no-build-isolation     # offline, uses the already-installed setuptools + Cython
 ```
 
-安装后得到：
+After installing:
 
-| 项目 | 名称 |
+| Item | Name |
 |---|---|
-| 发行包（distribution） | `GPEvo` |
-| 导入包 | `gpevo` |
-| 命令 | `gpevo` |
+| Distribution | `GPEvo` |
+| Import package | `gpevo` |
+| Command | `gpevo` |
 
 ```bash
-python -c "import gpevo; print(gpevo.__file__)"   # 验证安装位置
+python -c "import gpevo; print(gpevo.__file__)"   # verify where it was installed
 ```
 
-**免安装运行**：在仓库根目录放好 `INPUT.txt` 后直接 `python gpevo.py`（会把仓库根加入 `sys.path`）。
+**Running without installing**: put `INPUT.txt` in the repository root and run `python gpevo.py` directly (it adds the repo root to `sys.path`).
 
-## 快速开始
+## Quick start
 
-`example/` 下有一份 310 路径的样例输入（`INPUT.txt`、`MOL_1`、`MOL_2`、`POSCAR` 等），可以直接复制出来当工作目录的模板：
+`example/` contains a sample 310 input set (`INPUT.txt`, `MOL_1`, `MOL_2`, `POSCAR`, etc.); copy it out as a template for a working directory:
 
 ```bash
 mkdir -p run && cp example/INPUT.txt example/MOL_* run/
 cd run
-gpevo                       # 等价于 python -m gpevo
+gpevo                       # equivalent to python -m gpevo
 ```
 
-## 运行与输出
+## Running and output
 
-1. 准备工作目录，放入 `INPUT.txt` 和分子模板 `MOL_1`、`MOL_2`……（310 分子晶体路径的全部输入）。
-2. 在该目录执行：
+1. Prepare a working directory with `INPUT.txt` and the molecule templates `MOL_1`, `MOL_2`, ... (all inputs of the 310 molecular-crystal path).
+2. In that directory, run:
 
 ```bash
-gpevo                # 或 python -m gpevo
+gpevo                # or python -m gpevo
 ```
 
-### 输出文件一览
+### Output files
 
-| 文件/目录 | 内容 |
+| File / directory | Contents |
 |---|---|
-| `OUTPUT.txt` | 运行日志，含逐代 `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` 表；GP 开启时追加 `Enthalpy(GP) UC Density(GP) UC` 四列 |
-| `results1/Parameters.txt` | 启动时 `INPUT.txt` 的字节级副本（对应 MATLAB `Start.m:66` 的 `cp`）；只在新建 `results<N>` 时写一次，重启不覆盖，用来复盘该次计算最初的设置 |
-| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`origin`、`gp_gen*.png`、`density_predict.log` |
-| `CalcFold1/`… | 每个结构的弛豫/GP 计算目录，`gp.csv` 记录每次 GP 预测 |
-| `results*/<ID>/` | 某个结构走参考方法（SIESTA）打标签的工作目录；上一轮中断留下的空目录会在下次选点时自动清理 |
-| `ei.log` | 每代 EI 选中的晶体 ID |
+| `OUTPUT.txt` | Run log, including a per-generation `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` table; with GP enabled, four extra columns `Enthalpy(GP) UC Density(GP) UC` are appended |
+| `results1/Parameters.txt` | A byte-for-byte copy of `INPUT.txt` made at startup (the equivalent of the `cp` in MATLAB `Start.m:66`); written only once when a new `results<N>` is created, never overwritten on restart, so you can reconstruct the settings the run originally started with |
+| `results1/` (`results2/`, ...) | `gatheredPOSCARS`, `Individuals`, `Individuals.traj`, `origin`, `gp_gen*.png`, `density_predict.log` |
+| `CalcFold1/`, ... | Per-structure relaxation / GP working directories; `gp.csv` records every GP prediction |
+| `results*/<ID>/` | Working directory where a single structure is labelled by the reference method (SIESTA); empty directories left behind by an interrupted run are cleaned up automatically at the next selection |
+| `ei.log` | IDs of the crystals EI selected in each generation |
 
 ### `Individuals.traj`
 
-`gatheredPOSCARS` 的 ASE 可读版本：每个结构算完即追加一帧，帧序与 `Individuals` 表一致（`numParallelCalcs=1` 时严格一致），第 *i* 帧就是 `Individuals` 中 ID 为 *i+1* 的那个结构。帧的 `atoms.info` 带有 `Number / generation / howCome / symg / enthalpy / density`（有 GP 预测时还有 `energy_pred / uncertainty_eng / density_gp / uncertainty`），焓同时挂为单点能量，可直接分析：
+An ASE-readable version of `gatheredPOSCARS`: one frame is appended as soon as each structure finishes, in the same order as the `Individuals` table (strictly identical when `numParallelCalcs=1`), so frame *i* is the structure with ID *i+1* in `Individuals`. Each frame's `atoms.info` carries `Number / generation / howCome / symg / enthalpy / density` (plus `energy_pred / uncertainty_eng / density_gp / uncertainty` when a GP prediction exists), and the enthalpy is also attached as a single-point energy, so it can be analysed directly:
 
 ```python
 from ase.io import read
 frames = read("results1/Individuals.traj", index=":")
-print(frames[0].info)                          # 与 Individuals 行对应的元数据
-print(frames[0].get_potential_energy())        # 焓 (eV)
+print(frames[0].info)                          # metadata matching the Individuals row
+print(frames[0].get_potential_energy())        # enthalpy (eV)
 ```
 
 ### `origin`
 
-记录每个结构由哪个算子产生、父本是谁（`WriteOUTPUT.m` 的 `resFolder/origin`），是 `makeFigures.m` 给结构按算子着色的数据源：
+Records which operator produced each structure and who its parents were (`resFolder/origin` of `WriteOUTPUT.m`); it is the data source `makeFigures.m` uses to colour structures by operator:
 
 ```
  ID    Origin    Enthalpy   Parent-E   Parent-ID
@@ -118,306 +117,306 @@ print(frames[0].get_potential_energy())        # 焓 (eV)
  223 keptBest      -1.988    -1.988  [       151]
 ```
 
-`Enthalpy`/`Parent-E` 都是**每原子**焓（`Enthalpies(end)/sum(numIons)`）；无父本的结构（random）`Parent-ID` 为 `0` 并重复自身焓，种子结构父本信息为空，故 `Parent-E` 留空。格式与 MATLAB 版逐字节一致（含空父本时的空白列）。
+`Enthalpy` / `Parent-E` are both **per-atom** enthalpies (`Enthalpies(end)/sum(numIons)`); structures with no parent (random) have `Parent-ID` = `0` and repeat their own enthalpy, while seed structures have empty parent info, so `Parent-E` is left blank. The format is byte-for-byte identical to the MATLAB version (including the blank columns when a parent is empty).
 
-## INPUT.txt 扩展选项
+## INPUT.txt extensions
 
-以下三组都是**可选扩展**，不写即以默认行为运行。推荐统一用 `value : keyword`（USPEX 的规范写法），`keyword : value` 也认；注释用 `%`、`!` 或 `#` 都可以。
+The option groups below are all **optional extensions** — omit them and the default behaviour applies. Prefer the canonical USPEX form `value : keyword` (`keyword : value` is also accepted); comments may start with `%`, `!` or `#`.
 
-### GP 主动学习
+### GP active learning
 
 ```
-1         : gp            % 开关：1=启用，弛豫后追加一步 GP 评估
-24        : ncpu          % GP 训练并行核数；不写则取 % numProcessors 最后一项，再缺省 8
-data11_22 : data          % 训练数据目录（已有则直接用于 gp() 训练，没有则由本运行自己建）
-1.8       : den           % 密度门：gp() 的 --den，同时是 CalcFitness EI 门的密度下限
-0.04      : u             % 不确定度阈值（±1.96σ），超过才送 DFT
-2         : k             % 每代 EI top-K 个数
+1         : gp            % switch: 1 = enabled, adds a GP evaluation step after relaxation
+24        : ncpu          % parallel cores for GP training; if omitted, takes the last % numProcessors entry, else 8
+data11_22 : data          % training-data directory (used directly by gp() if present, otherwise built by this run)
+1.8       : den           % density gate: gp()'s --den, also the lower density bound of the CalcFitness EI gate
+0.04      : u             % uncertainty threshold (±1.96σ); a structure is sent to DFT only above it
+2         : k             % number of EI top-K picks per generation
 ei        : mode          % ei | random | uncertainty
-2         : nboot         % 训练集为空时首批打标签的结构数（默认 2，需 ≥2）
-1         : cache         % 1（默认）= pred 复用 GP 步已算出的 10 维特征；0 = 每个晶体重算
-1         : explore       % 1（默认）= 完整 EI；0 = 去掉 σ·φ(Z) 项，只按提升量排序
+2         : nboot         % structures labelled in the first batch when the training set is empty (default 2, must be ≥2)
+1         : cache         % 1 (default) = pred reuses the 10-D feature already computed in the GP step; 0 = recompute per crystal
+1         : explore       % 1 (default) = full EI; 0 = drop the σ·φ(Z) term and rank by improvement alone
 ```
 
-#### `explore : 0` —— 关掉 EI 的探索项
+#### `explore : 0` — turning off EI's exploration term
 
-EI = (μ − f_best)·Φ(Z) + **σ·φ(Z)**。后一项是唯一"奖励未知"的项：一个 GP 从没见过的晶体自带很宽的后验，σ·φ(Z) 可以盖过提升项，于是**预测值明明比 incumbent 还差的低质量晶体**反而排到前面，白白花掉一次昂贵的参考计算。关掉之后只剩纯粹的利用项——提升幅度 × 提升概率：
+EI = (μ − f_best)·Φ(Z) + **σ·φ(Z)**. The second term is the only one that **rewards the unknown**: a crystal the GP has never seen carries a wide posterior, so σ·φ(Z) can outweigh the improvement term and a **low-quality crystal whose prediction is actually worse than the incumbent** ends up ranked first, wasting an expensive reference calculation. With it disabled only the pure exploitation term remains — improvement magnitude × probability of improvement:
 
 ```
-1.9 是观测到的 incumbent（feature.csv 里 DFT 密度的最大值）
-  晶体 A: μ=1.82, σ=0.50  →  EI = −0.035 + 0.197 = 0.162   ← 竟然赢了
-  晶体 B: μ=1.95, σ=0.05  →  EI =  0.042 + 0.012 = 0.054
-explore : 0 后
-  晶体 A: −0.035   ← 归位
-  晶体 B:  0.042   ← 赢
+1.9 is the observed incumbent (largest DFT density in feature.csv)
+  crystal A: μ=1.82, σ=0.50  →  EI = −0.035 + 0.197 = 0.162   ← surprisingly wins
+  crystal B: μ=1.95, σ=0.05  →  EI =  0.042 + 0.012 = 0.054
+with explore : 0
+  crystal A: −0.035   ← back where it belongs
+  crystal B:  0.042   ← wins
 ```
 
-代价是失去探索：训练库很久没有新区域时，σ 大的晶体不再被优先采样，模型可能收敛到一个局部区域。想保留探索就保持 `1`，或改用 `mode : uncertainty`（那本来就是纯 σ 排序，是另一回事）。`mode` 标签会打印成 `EI (no exploration)` 以示区别。
+The price is losing exploration: when the training database has had no new region for a long time, high-σ crystals are no longer sampled preferentially and the model may converge to a local region. To keep exploration, leave it at `1`, or switch to `mode : uncertainty` (which is pure σ ranking — a different thing). The `mode` label is printed as `EI (no exploration)` to mark the difference.
 
-#### 重启时会重读 INPUT.txt
+#### INPUT.txt is re-read on restart
 
-`Start()` 的重启分支是从 `Current_ORG.pkl` 恢复 ORG 的，以前只重解析了指纹块，所以**停机期间改的 INPUT.txt 一律不生效**（GP 的 `den`/`u`/`k`/`explore` 尤其容易被忽略）。现在重启会重新跑一遍选项解析器（`createORG_System` / `_AbinitCode` / `_Symmetry` / `_EA` / `_Molecule` / `_Fingerprint`，它们都是纯函数，只改 ORG 属性），改完的项会打印出来：
+The restart branch of `Start()` recovers ORG from `Current_ORG.pkl`; it used to re-parse only the fingerprint block, so **any INPUT.txt edits made while stopped had no effect** (the GP `den` / `u` / `k` / `explore` settings were especially easy to overlook). A restart now re-runs the whole option parser (`createORG_System` / `_AbinitCode` / `_Symmetry` / `_EA` / `_Molecule` / `_Fingerprint` — all pure functions that only change ORG attributes), and the changed entries are printed:
 
 ```
   INPUT.txt (re-read on restart) gpDen: 1.8 -> 1.75
   INPUT.txt (re-read on restart) gpU: 0.03 -> 0.06
 ```
 
-两类属性**不会**被 INPUT.txt 覆盖，仍以 checkpoint 为准：
+Two kinds of attributes are **never** overwritten by INPUT.txt and still come from the checkpoint:
 
-- **开局就定死的结构量**：`dimension` / `molecule` / `varcomp` / `optType` / `populationSize` / `numGenerations` / `numIons` / `resFolder` —— 中途改了会和 checkpoint 里已恢复的种群矛盾；
-- **循环自己写回的演进量**：`latVolume`（每代由种群体积重新平均）、`firstGeneSplit*`、以及 `update_STUFF` 每代重建的 `tournament` / `fracTrans` / `howMany*` 等。
+- **Structural quantities fixed at the very start**: `dimension` / `molecule` / `varcomp` / `optType` / `populationSize` / `numGenerations` / `numIons` / `resFolder` — changing them mid-run would contradict the population already restored from the checkpoint;
+- **Evolving quantities the loop writes back itself**: `latVolume` (re-averaged from population volumes each generation), `firstGeneSplit*`, and the `tournament` / `fracTrans` / `howMany*` values that `update_STUFF` rebuilds every generation.
 
-INPUT.txt 写坏了也不会让正在跑的计算挂掉：解析异常时打印一行 `Warning: INPUT.txt could not be re-read on restart`，然后把 checkpoint 原样放回去继续跑。
+A broken INPUT.txt does not crash a running calculation either: if parsing throws, it prints `Warning: INPUT.txt could not be re-read on restart` and puts the checkpoint back unchanged before continuing.
 
-`cache : 1` 省掉的是每代每个晶体 1 次 ReaxFF 重优化 + 4 次 GULP（特征计算）。前提是 GP 步读的 `gulp.cif` 与 `Individuals.traj` 帧是**同一个弛豫后的结构**（`WriteIndividualsTraj` 写的就是 `s.COORDINATES`），所以复用不会换结构，只是不再重新走一遍极小化。日志会打出实际复用个数：
+What `cache : 1` saves is one ReaxFF re-optimisation + four GULP runs (feature calculation) per crystal per generation. The precondition is that the `gulp.cif` read by the GP step and the `Individuals.traj` frame are **the same relaxed structure** (`WriteIndividualsTraj` writes `s.COORDINATES`), so reusing it does not swap structures — it merely skips a repeated minimisation. The log prints how many were actually reused:
 
 ```
   pred: reusing the GP-step feature for 132/134 crystal(s), skipping their ReaxFF re-optimisation
 ```
 
-> 若 `gp` 一行因写法问题没被读入（例如关键字被注释污染），开关会**静默**保持 0——整条 GP 链都不发生。启动时会打印告警列出有问题的行。
+> If the `gp` line is not read because of a syntax issue (for example the keyword was polluted by a comment), the switch **silently** stays at 0 and the entire GP chain never happens. Startup prints a warning listing the offending lines.
 
-EI 用哪个量做采集函数，由 `optType` 决定：
+Which quantity EI uses as its acquisition function is decided by `optType`:
 
-| optType | 采集量 μ | σ |
+| optType | Acquisition target μ | σ |
 |---|---|---|
-| `1`（焓极小） | GP 预测能量 `energy_gp` 取负（极小化） | `uncertainty_eng` |
-| `-1`（焓极大） | 同上取正（极大化） | `uncertainty_eng` |
-| 其它（默认 11 等） | GP 预测密度 `density_gp`（极大化） | `uncertainty` |
+| `1` (enthalpy minimisation) | GP predicted energy `energy_gp`, negated (minimisation) | `uncertainty_eng` |
+| `-1` (enthalpy maximisation) | the same, taken positive (maximisation) | `uncertainty_eng` |
+| Others (default 11, etc.) | GP predicted density `density_gp` (maximisation) | `uncertainty` |
 
-`den`（密度门）不受此影响，始终作用在预测密度上；`u`（±1.96σ）则作用在对应采集量的 σ 上，因此 optType 1 时它的单位是能量（eV），按能量不确定度的量级调即可。整代没有一个结构带可用的能量预测时（老 gp.csv 或 gp() 失败），会打印一行提示并退回密度。
+`den` (density gate) is unaffected and always applies to the predicted density; `u` (±1.96σ) applies to the σ of the corresponding acquisition target, so with optType 1 its unit is energy (eV) and should be tuned to the scale of the energy uncertainty. When no structure in a generation has a usable energy prediction (an old `gp.csv`, or `gp()` failed), a note is printed and it falls back to density.
 
-流程：
+Pipeline:
 
-1. **自举（第一代末）**：训练库不足 2 行时，按适应度取前 `nboot` 个结构，`uspexkit.calc()` 用参考方法（SIESTA）算它们的能量/密度，自动建起 `<homePath>/<data>/{feature_mlp.csv, feature.csv, structures.traj}`。这一代 GP 步整体跳过（无任何结构失败）。
-2. **逐代生长（第二代起）**：`CalcFitness` 里按 `mode` 规则（EI / 不确定度 / 随机）取 top-`k`，再过 `u`（±1.96σ）与 `den` 两道门，选中的结构同样送参考方法打标签 → 追加进训练库。
-3. **重训**：确实有新行入库才清理模型缓存——这些 pickle（`gpr_density.pkl` / `gpr_energy.pkl` / `rfr.pkl`，散落在 `CalcFold*`、`results*`、`data/` 三处）只按内核版本做戳，不清就不会因为数据变多而重训。随后 `uspexkit.pred()` 重预测并把新值回写适应度。
+1. **Bootstrap (end of generation 1)**: when the training database has fewer than 2 rows, take the top `nboot` structures by fitness, let `uspexkit.calc()` compute their energies/densities with the reference method (SIESTA), and build `<homePath>/<data>/{feature_mlp.csv, feature.csv, structures.traj}` automatically. The GP step is skipped entirely for this generation (no structure fails).
+2. **Per-generation growth (from generation 2)**: inside `CalcFitness`, take top-`k` by the `mode` rule (EI / uncertainty / random), pass the `u` (±1.96σ) and `den` gates, and send the selected structures to the reference method for labelling → appended to the training database.
+3. **Retraining**: the model cache is cleared only when a new row really entered the database — these pickles (`gpr_density.pkl` / `gpr_energy.pkl` / `rfr.pkl`, scattered across `CalcFold*`, `results*` and `data/`) are stamped only by kernel version, so without clearing they would not retrain as the data grows. Then `uspexkit.pred()` re-predicts and writes the new values back into the fitness.
 
-数据真的在长吗？看日志里这两行：
+Is the data really growing? Watch these two log lines:
 
 ```
   GP training set has only 0 labelled row(s) in /home/feng/tnt/data_exp: seeding it with the best structures of generation 1
   GP training set: 0 -> 2 rows; dropped 3 cached model(s)
 ```
 
-每代结束还会打一行学习曲线，**这一行是判断"学习到底有没有在发生"的依据**（被门挡住、一个标签都没打时是 `+0`）：
+Each generation also prints a learning-curve line — **this line is the evidence for whether learning is actually happening** (it reads `+0` when a gate blocked everything and no label was added):
 
 ```
   GP learning curve (gen 3): rows 216 -> 220 (+4)  LOO RMSE density=0.0312 g/cm^3  energy=0.4123 eV
 ```
 
-`LOO RMSE` 用帽子矩阵恒等式从已拟合模型的 Cholesky 因子直接算（Rasmussen & Williams 5.12，无需重拟合），超参是全程数据上拟合的那套，所以偏乐观一点；库超过 2000 行或找不到 uspexkit 缓存的模型时显示 `n/a`。
+`LOO RMSE` is computed directly from the Cholesky factor of the already-fitted model via the hat-matrix identity (Rasmussen & Williams 5.12, no refitting needed); the hyperparameters are the ones fitted on all the data so far, so it is slightly optimistic. It shows `n/a` when the database exceeds 2000 rows or the cached uspexkit model cannot be found.
 
-没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
+When nothing grows, it also says which gate blocked it (`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`). The usual cause is that the reference method cannot run: labels depend on `siesta` (`mpirun`) + `<homePath>/Specific/*.psf`, and a missing one triggers an early warning at startup. Every generation also draws `results*/gp_gen*.png` (four panels: population distribution / exploration map / predicted vs adopted values / extrapolation check).
 
-> GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），以进程内 API 方式调用；改内核需重装 uspexkit。
+> The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), called as an in-process API; changing the kernel requires reinstalling uspexkit.
 
-### swarm 算子（可选）
+### swarm operator (optional)
 
-分子感知的刚体移动，默认关闭（不写就完全不改变现有算子配比）：
-
-```
-0.1   : fracSwarm    % 每代额外产生的 swarm 结构数 = round(populationSize × 该值)
-0.5   : swarmStep    % 分子向最优结构对应分子移动的位移比例上限（0~1）
-30    : swarmAngle   % 取向朝最优结构 slerp 插值的转动角度上限（度，0 = 不转）
-0     : swarmInertia % PSO 惯性权重 w（0 = 无动量）
-0     : swarmCognitive % PSO 认知项系数 c1（0 = 不用个体历史最优）
-```
-
-它把每个**分子整体**当作一个刚体，向当代最优结构中对应分子的位置移动一个随机比例的位移，取向则用 Kabsch + 四元数 slerp 朝对应分子插值（单次转动不超过 `swarmAngle`，不再是随机转动）——`MOLCOORS` 只做刚体变换，分子内几何**逐位不变**，因此不像原子级软模位移那样会把分子撕开。位移会先把最优结构的质心按其晶胞对齐到子代参考系再做最小镜像折叠，晶胞本身不变（交给后续弛豫）。每个结构还携带一份可 pickle 的速度 / 个体历史最优（pbest）状态，随 `Current_POP.pkl` 重启不丢，由 `swarmInertia` / `swarmCognitive` 两个系数控制动量与认知项（默认 0 = 只保留朝当代最优的社会项）。算法细节、与 PSO 的差别、以及对多组分共晶的适用性评估见 [`docs/swarm_operator.md`](docs/swarm_operator.md)；两个系数的推荐取值与稳定性推导见 [`docs/swarm_pso_coefficients.md`](docs/swarm_pso_coefficients.md)。
-
-两点说明：
-
-- 这是 PSO **思想**（向最优个体靠拢 + 随机步长）在分子晶体上的实现，**不是** uspex-gp 那个 PSO 模块的移植：后者是逐原子随机放置 + 原子软模位移，不支持分子。
-- swarm 结构是**额外**加在 `populationSize` 之上的（与精英保留追加的结构同理），不会挤占现有算子的配额；未设 `fracSwarm` 时计数为 0，行为与之前完全一致。
-
-### AntiSeeds 反种子（可选）
-
-把**已经过度采样**的结构指纹区域设为排斥源：与反种子指纹越像的结构，适应度被抬得越高（越不容易被选中做父代），从而把搜索面推开。对应 `uspex-gp` 的 `pickAntiSeeds.m` + `AntiSeedsCorrection.m`，在 `CalcFitness_310` 之后、`FitnessRankingCorrection` 之前生效。
-
-**用法**：把不希望再采到的结构（若干个 POSCAR 顺次拼接）放进 `<homePath>/AntiSeeds/POSCARS`，启动时（新跑和重启都会）读入并算出各自指纹作为排斥源。
+Molecule-aware rigid-body motion, off by default (leaving it out does not change the existing operator mix at all):
 
 ```
-0.5   : antiSeedsMax         % 惩罚强度系数；0（默认）表示整个 AntiSeed 关闭
-0.02  : antiSeedsSigma       % 惩罚宽度系数
-3     : antiSeedsActivation  % |值|：>0 从该代起把全种群都加为反种子，<0 只加最优结构
+0.1   : fracSwarm    % extra swarm structures per generation = round(populationSize × this value)
+0.5   : swarmStep    % upper bound (0~1) on the fraction of displacement toward the corresponding molecule of the best structure
+30    : swarmAngle   % upper bound (degrees) on the rotation interpolating orientation toward the best structure via slerp (0 = no rotation)
+0     : swarmInertia % PSO inertia weight w (0 = no momentum)
+0     : swarmCognitive % PSO cognitive coefficient c1 (0 = no personal best)
 ```
 
-惩罚公式（`AntiSeedsCorrection.m:57`）：每个种群成员的适应度加上
+It treats each **molecule as a whole rigid body**, moving it by a random fraction of the displacement toward the corresponding molecule in the current best structure, while interpolating its orientation toward that molecule with Kabsch + quaternion slerp (a single rotation never exceeds `swarmAngle`, so it is no longer a random rotation) — `MOLCOORS` undergoes only rigid transforms, so intramolecular geometry is **bit-for-bit unchanged**, unlike atom-level soft-mode displacement which can tear molecules apart. The displacement first aligns the best structure's centre of mass to the child's reference frame using its cell, then applies minimum-image folding; the cell itself is unchanged (left to the subsequent relaxation). Each structure also carries a picklable velocity / personal-best (pbest) state that survives restarts via `Current_POP.pkl`, with momentum and the cognitive term controlled by `swarmInertia` / `swarmCognitive` (both default 0 = only the social term toward the current best remains). For the algorithm details, how it differs from PSO, and an assessment of its suitability for multi-component cocrystals see [`docs/swarm_operator.md`](docs/swarm_operator.md); recommended values for the two coefficients and their stability derivation are in [`docs/swarm_pso_coefficients.md`](docs/swarm_pso_coefficients.md).
+
+Two notes:
+
+- This is the PSO **idea** (move toward the best individual + random step size) implemented for molecular crystals, **not** a port of uspex-gp's PSO module: the latter places atoms randomly one by one and applies atomic soft-mode displacements, and does not support molecules.
+- swarm structures are added **on top of** `populationSize` (like the structures appended by elitism), so they do not take quota away from existing operators; with `fracSwarm` unset the count is 0 and behaviour is exactly as before.
+
+### AntiSeeds (optional)
+
+Treat regions of structure-fingerprint space that have already been **over-sampled** as repulsion sources: the more a structure resembles an anti-seed fingerprint, the more its fitness is raised (the less likely it is to be chosen as a parent), pushing the search surface outward. It corresponds to `pickAntiSeeds.m` + `AntiSeedsCorrection.m` in `uspex-gp` and takes effect after `CalcFitness_310`, before `FitnessRankingCorrection`.
+
+**Usage**: put the structures you no longer want sampled (several POSCARs concatenated in sequence) into `<homePath>/AntiSeeds/POSCARS`; they are read at startup (both for fresh runs and restarts) and their fingerprints computed as repulsion sources.
+
+```
+0.5   : antiSeedsMax         % penalty strength coefficient; 0 (default) disables AntiSeeds entirely
+0.02  : antiSeedsSigma       % penalty width coefficient
+3     : antiSeedsActivation  % |value|: >0 adds the whole population as anti-seeds from that generation on, <0 adds only the best structure
+```
+
+Penalty formula (`AntiSeedsCorrection.m:57`): each population member's fitness gets
 
 ```
 Δ = Max · exp( −cos_dist² / (2·Sigma²) )
 ```
 
-其中 `cos_dist` 是该结构与反种子指纹的余弦距离：完全一样（距离 0）吃到满额 `Max`，差异越大衰减越快。
+where `cos_dist` is the cosine distance between that structure and the anti-seed fingerprint: an exact match (distance 0) receives the full `Max`, and the penalty decays quickly as the difference grows.
 
-- `Max` 每代自适应：**当前值 = `antiSeedsMax` ×（最优 `bestFrac` 部分适应度的均值 − 最小值）**，即随适应度展宽而涨；`generation > antiSeedsActivation + 1` 后还有一半衰减保底，不会掉得比 `0.5×上一代` 更快。
-- `Sigma` 每代自适应：**当前值 = `antiSeedsSigma` × 最优区结构两两指纹的平均余弦距离**，第 1 代用它统一标定所有预置反种子。
-- 到达 `antiSeedsActivation` 后开始自学习：`>0` 追加全部种群指纹，`<0` 只追加当代最优那一个——这样搜索会自动避开已经挤在一起的区域。
-- 状态存在 `<homePath>/Current_ANTISEEDS.pkl`（与 `Current_ORG/POP.pkl` 同族），重启时优先加载而不是重读 POSCARS；`gpevo clean` 会把它清掉。
+- `Max` adapts each generation: **current value = `antiSeedsMax` × (mean fitness of the best `bestFrac` portion − its minimum)**, i.e. it grows as the fitness spread widens; after `generation > antiSeedsActivation + 1` a half-decay floor keeps it from dropping faster than `0.5× the previous generation`.
+- `Sigma` adapts each generation as well: **current value = `antiSeedsSigma` × the mean pairwise fingerprint cosine distance among structures in the best region**; generation 1 uses it to calibrate all preloaded anti-seeds uniformly.
+- Once `antiSeedsActivation` is reached it starts self-learning: `>0` appends all population fingerprints, `<0` only the single best of that generation — so the search automatically steers away from regions that are already crowded.
+- State lives in `<homePath>/Current_ANTISEEDS.pkl` (same family as `Current_ORG/POP.pkl`); on restart it is loaded in preference to re-reading POSCARS, and `gpevo clean` removes it.
 
-**调参提示**：`antiSeedsSigma` 直接决定排斥范围，`Sigma ≈ antiSeedsSigma × 最优区平均指纹距离`。实测一组 TNT 类结构（到反种子的余弦距离依次 0.00 / 0.33 / 0.46）在 `antiSeedsMax=2` 下抬高量：
+**Tuning tip**: `antiSeedsSigma` directly sets the repulsion radius, `Sigma ≈ antiSeedsSigma × mean fingerprint distance in the best region`. Measured on one set of TNT-like structures (cosine distances to the anti-seed 0.00 / 0.33 / 0.46) with `antiSeedsMax=2`, the fitness boosts are:
 
-| `antiSeedsSigma` | 完全一样 | 比较像(0.33) | 很不一样(0.46) |
+| `antiSeedsSigma` | Identical | Fairly similar (0.33) | Very different (0.46) |
 |---|---|---|---|
-| 0.001（默认） | 1.000 | 0.000 | 0.000 |
+| 0.001 (default) | 1.000 | 0.000 | 0.000 |
 | 0.02 | 1.000 | 0.000 | 0.000 |
 | **0.5** | 1.011 | 0.143 | 0.036 |
 | 1.0 | 1.327 | 0.903 | 0.729 |
 
-默认的 `0.001`（以及 0.02 这种小值）实际是"**只排开几乎重复的结构**"，想让 replusion 有梯度、把比较像的结构一起推开，建议取 **0.3~1.0**（约 0.5 时区分度最好）；再大就变成全局都罚了。`antiSeedsMax` 控制抬高多少，`0`（默认）整个功能关闭。
+The default `0.001` (and small values such as 0.02) really means **only near-duplicate structures are pushed away**; to give repulsion a gradient and push away fairly similar structures too, use **0.3~1.0** (around 0.5 gives the best discrimination); larger values penalise everything globally. `antiSeedsMax` controls how much is added, and `0` (default) disables the whole feature.
 
-> 与 MATLAB 的一处已知差异：参考实现给反种子算指纹时**不做分子内过滤**，而 gpevo 里分子体系（`molecule=1`，即 310 场景）的种群指纹会过滤掉分子内原子对。为保持一致，`pickAntiSeeds` 目前也按参考实现走（不过滤）；若发现距离被系统性抬高、惩罚偏弱，可在这条路径上补 `intra_map`。
+> One known difference from MATLAB: the reference implementation computes anti-seed fingerprints **without intramolecular filtering**, whereas population fingerprints for molecular systems in gpevo (`molecule=1`, i.e. the 310 case) filter out intramolecular atom pairs. To stay consistent, `pickAntiSeeds` currently follows the reference (no filtering); if distances turn out systematically inflated and the penalty too weak, `intra_map` can be added on this path.
 
-### 强化学习算子/参数优化（可选）
+### Reinforcement-learning operators / parameter tuning (optional)
 
-`RL_strategy ≥ 1` 开启一个分层 contextual bandit：外层学 6 个算子的配额，内层对 Rotation / LatMutate / softmutate 三个算子的**连续变异幅度**做 Thompson 采样。状态存 `rl_agent_state.pkl`，可跨任务导出的先验放在 `RLPriors/`。
-
-```
-2      : RL_strategy    % 0=关；>=1 开启 bandit
-0.9    : RL_forget      % 遗忘因子 λ（历史统计衰减）
-1.0    : RL_w1          % 奖励权重：入选精英集
-0.5    : RL_w2          % 奖励权重：焓相对增益
-0.6    : RL_armCap      % 单个算子占比上限
-1.0    : RL_kappa       % 内层探索系数，越大幅度探索越激进
-1      : RL_autoExport  % 导出跨任务先验
-angle  : RL_inner       % 内层只动旋转角，其余三个保持 INPUT 的值（默认 all）
-```
-
-内层学的四个连续参数，也都有 INPUT 入口（`RL_strategy=0` 时**直接固定为你设的值**；开启 RL 时作为**学习起点**）：
+`RL_strategy ≥ 1` enables a hierarchical contextual bandit: the outer layer learns the quotas of the 6 operators, while the inner layer performs Thompson sampling on the **continuous variation magnitudes** of three operators — Rotation / LatMutate / softmutate. State is stored in `rl_agent_state.pkl`, and priors exportable across tasks live in `RLPriors/`.
 
 ```
-45     : rotationAngleMax   % 旋转变异角度上限，**单位度**（内部转弧度）
-0.3    : translationMax     % 旋转后的刚体平移上限
-0.15   : mutationRate       % LatMutation 应变 σ（正态分布，对齐 lattice_Mutation）
-1.5    : softStepScale      % softmutate 步长缩放
+2      : RL_strategy    % 0 = off; >=1 enables the bandit
+0.9    : RL_forget      % forgetting factor λ (decay of historical statistics)
+1.0    : RL_w1          % reward weight: being selected into the elite set
+0.5    : RL_w2          % reward weight: relative enthalpy gain
+0.6    : RL_armCap      % upper bound on a single operator's share
+1.0    : RL_kappa       % inner exploration coefficient; larger = more aggressive amplitude exploration
+1      : RL_autoExport  % export cross-task priors
+angle  : RL_inner       % inner layer learns only the rotation angle, the other three keep their INPUT values (default all)
 ```
 
-RL 开启时的搜索范围固定为：角度 15°–90°、平移 0.1–0.8、应变 0.05–0.30、步长缩放 0.5–2.0（超出的设置值会被夹到区间端点）。
-
-### 只让 RL 学一个参数（`RL_inner`）
-
-默认（`RL_inner` 缺省或 `all`）内层每代对**四个**幅度一起做 Thompson 采样，想做单参数消融就要把它们分开——`RL_inner` 逐个点名，没点到的保持 INPUT 里的固定值：
+The four continuous parameters learned by the inner layer also have INPUT entries (with `RL_strategy=0` they are **fixed outright to the values you set**; with RL enabled they serve as the **learning starting point**):
 
 ```
-angle        : RL_inner   % 只学 rotationAngleMax（平移/应变/步长固定）
-translation  : RL_inner   % 只学 translationMax
-mutation     : RL_inner   % 只学 mutationRate
-softstep     : RL_inner   % 只学 softStepScale
-rotate       : RL_inner   % arm 4 的两个一起学（角度 + 平移）
-angle,softstep : RL_inner % 多个用逗号/空格分隔（不要写成 "angle, softstep"）
-none         : RL_inner   % 内层完全不学，四个都用 INPUT 的固定值
+45     : rotationAngleMax   % upper bound on rotation mutation angle, **in degrees** (converted to radians internally)
+0.3    : translationMax     % upper bound on rigid-body translation after rotation
+0.15   : mutationRate       % LatMutation strain σ (normal distribution, aligned with lattice_Mutation)
+1.5    : softStepScale      % softmutate step-size scaling
 ```
 
-识别不分大小写（也认 `all` / `on` / `1`、`none` / `off` / `0`、以及 `latmut` / `softmut`），拼错的名字会告警并退回 `all`。
+With RL on, the search ranges are fixed: angle 15°–90°, translation 0.1–0.8, strain 0.05–0.30, step scaling 0.5–2.0 (settings outside the range are clamped to its endpoints).
 
-于是「只测旋转角」的写法就是：`1 : RL_strategy` + `angle : RL_inner` + 把另外三个写成你要的固定值。注意两点：
+### Letting RL learn a single parameter (`RL_inner`)
 
-- 外层 6 臂 bandit 仍在学算子配额（想把它也定住，只能 `0 : RL_strategy` 走固定值扫描）；
-- 对照实验要换独立目录或先删 `rl_agent_state.pkl`（存在时 INPUT 的初值不再生效），并把 `RLPriors/operator_prior.pkl` 与 `~/.config/uspex-gp/RLPriors/operator_prior.pkl` 挪开，否则先验会覆盖起点。
+By default (with `RL_inner` omitted or set to `all`) the inner layer Thompson-samples **all four** magnitudes together every generation; to ablate one parameter at a time, name them individually with `RL_inner` — anything not named keeps its fixed INPUT value:
 
-角度的实际取值是 `±rotationAngleMax/3`（`Rotation_310.py:40`），设 90° 实际是 ±30°；每代采到的 `u`（角度 = `15° + u×75°`）记在 `rl_agent_state.pkl` 的 `history` 里。
+```
+angle        : RL_inner   % learn only rotationAngleMax (translation/strain/step fixed)
+translation  : RL_inner   % learn only translationMax
+mutation     : RL_inner   % learn only mutationRate
+softstep     : RL_inner   % learn only softStepScale
+rotate       : RL_inner   % learn both parameters of arm 4 together (angle + translation)
+angle,softstep : RL_inner % separate several with commas/spaces (do not write "angle, softstep")
+none         : RL_inner   % inner layer learns nothing; all four use the fixed INPUT values
+```
 
-## 分析与绘图工具
+Recognition is case-insensitive (also accepts `all` / `on` / `1`, `none` / `off` / `0`, and `latmut` / `softmut`); misspelled names warn and fall back to `all`.
+
+So "test only the rotation angle" means: `1 : RL_strategy` + `angle : RL_inner` + fixed values for the other three. Two caveats:
+
+- The outer 6-arm bandit is still learning operator quotas (to freeze that too, you have to use `0 : RL_strategy` and sweep fixed values);
+- For a controlled comparison, use a separate directory or delete `rl_agent_state.pkl` first (while it exists, the INPUT starting values no longer apply), and move `RLPriors/operator_prior.pkl` and `~/.config/uspex-gp/RLPriors/operator_prior.pkl` aside, otherwise the priors will override the starting point.
+
+The angle actually used is `±rotationAngleMax/3` (`Rotation_310.py:40`), so setting 90° means ±30°; the `u` sampled each generation (angle = `15° + u×75°`) is recorded in the `history` of `rl_agent_state.pkl`.
+
+## Analysis and plotting tools
 
 ```bash
-# 多次运行的密度/能量分布对比（输出 compare_runs.png）
+# Compare density/energy distributions across runs (writes compare_runs.png)
 python compare_runs.py --dirs tnt/results2 uspex-gp/results1 --labels gpevo octave
 
-# DFT 结果绘图 / 空间群覆盖度统计 / EI 日志
+# DFT result plotting / space-group coverage statistics / EI log
 python plot_dft.py
 python sg_coverage.py
 python ei_select.py
 ```
 
-## 命令行
+## Command line
 
 ```bash
-gpevo               # 跑搜索（等价于 gpevo run，与旧行为一致）
-gpevo clean         # 清理运行目录
-gpevo clean -n      # 只列出会删什么，不动文件
-gpevo clean -a      # 连 results*/ 一起删
-gpevo clean -p DIR  # 清理别的目录（不是当前目录）
-gpevo clean -f      # 目录里没有 INPUT.txt / CalcFold 也照样清
-gpevo ei-report     # 逐代密度演化 + EI 收敛性（见下）
+gpevo               # run the search (equivalent to gpevo run, same as the old behaviour)
+gpevo clean         # clean up the run directory
+gpevo clean -n      # only list what would be deleted, touch nothing
+gpevo clean -a      # also delete results*/
+gpevo clean -p DIR  # clean a different directory (not the current one)
+gpevo clean -f      # clean even without INPUT.txt / CalcFold in the directory
+gpevo ei-report     # per-generation density evolution + EI convergence (see below)
 gpevo ei-report -p DIR --out PREFIX --trials 300
 ```
 
 ### `gpevo ei-report`
 
-读一个运行目录里**已经落盘**的东西（不重算任何 GP/ReaxFF）——`results1/Individuals`（每代每个结构的密度）、`results1/density_predict.log`（GP μ/σ，**逐代追加、跨代累积**）、`results1/density.log`（DFT 参考）、`ei.log`（每代 EI 送 DFT 的 id）、`log`（`GP learning curve` 行）——画三张图并打一份逐代报告：
+Reads what has **already been written to disk** in a run directory (no GP/ReaxFF recomputation) — `results1/Individuals` (density of every structure in every generation), `results1/OUTPUT.txt` (the `Enthalpy(GP) UC Density(GP) UC Residual` block at the end of each generation's SUMMARY table, i.e. the GP mean μ and its uncertainty), `results1/density.log` (DFT reference), `ei.log` (ids EI sent to DFT each generation), `log` (`GP learning curve` lines) — and draws three figures plus a per-generation report:
 
-- **evolution**：全部结构散点 + 每代最优曲线 + best-so-far 阶梯，EI 选中的晶体画绿圈、DFT 验证值画红菱形；
-- **convergence**：EI 选择趋势图，横轴是**代次**、纵轴是**密度**——每个被 EI 选中的晶体按所在代次画一个紫方块，即 EI 真正排序用的 **GP 预测均值 μ**，`±1.96σ` 误差棒画在**这个 GP 预测值**上（σ 是 GP 后验的标准差，不属于 MLP 弛豫密度）；同一晶体 GP 预测与 DFT 真值之间用灰色虚线连起来便于比对，蓝色**圆点 + 直线**是该代次为止的最佳密度（`Individuals` 里的密度），红菱形是该晶体的 DFT 真值；
-- **learning**：每代平均 GP σ、打标签数与 LOO RMSE（有记录才画）。
+- **evolution**: scatter of all structures + per-generation best curve + best-so-far step line; EI-selected crystals get green rings and DFT-verified values red diamonds;
+- **convergence**: EI selection trend with **generation** on the x-axis and **density** on the y-axis — every EI-selected crystal is a purple square at its generation, holding the **GP predicted mean μ** that EI actually ranked on, with the `±1.96σ` error bar drawn on **that GP prediction** (σ is the posterior standard deviation of the GP, not of the MLP relaxation density); a grey dashed line connects the GP prediction and the DFT truth of the same crystal for comparison, the blue **dots + line** are the best density so far at that generation (density from `Individuals`), and the red diamond is that crystal's DFT truth;
+- **learning**: mean GP σ per generation, number of labels added, and LOO RMSE (drawn only when logged).
 
-误差棒的 σ 来自 `density_predict.log`。早期版本每代都会**重写**这个文件，所以只有最后一代的晶体留有 σ，`convergence` 图上就只有最新那个点有误差棒（此时 `ei-report` 会打印 `σ for n/m EI-selected crystals` 提示）；现在它改为逐代追加，新跑的运行每个点都有误差棒。已经跑完的旧运行里，往代的 σ 没有落盘，无法事后补回。
+The σ of the error bars comes from the `UC` column of each generation's SUMMARY table in `OUTPUT.txt` (it is already `1.96σ`; `ei-report` divides it back to the raw σ and scales it up again). SUMMARY tables are written **every generation**, so every EI-selected crystal of a fresh run has both μ and an error bar; a `σ for n/m EI-selected crystals` note is printed only when a generation genuinely has no GP row. Early versions read `density_predict.log`, which was rewritten every generation and held the post-label re-prediction, so its coverage was incomplete; the source is now uniformly `OUTPUT.txt`. Pointing it at an old run whose `OUTPUT.txt` has no GP table (e.g. a pure MATLAB output) yields a report with no GP predictions.
 
-真实运行上它直接回答"EI 到底有没有用"：某个 TNT·CL-20 运行（14 代、690 结构、26 个标签）上，EI 第 1 个标签就到 1.918、第 4 个到 1.94，随机基线要到第 ~8 个标签才追平，最终 1.9470 对随机的 90 分位 1.9460。
+On a real run it answers "is EI actually useful?" directly: on one TNT·CL-20 run (14 generations, 690 structures, 26 labels), EI reached 1.918 on its first label and 1.94 by the fourth, while the random baseline only caught up around the ~8th label, finishing at 1.9470 versus the random 90th percentile of 1.9460.
 
-`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings`、`ei.log` 这些状态文件（`ei.log` 是追加写的，留着会把两轮运行选中的晶体混在一个文件里，`gpevo ei-report` 也会一起画进去）。
+What `gpevo clean` deletes is what a new round should not inherit: `AntiSeeds/`, `CalcFold*` (all of them, not just `CalcFold1`), `results*/<ID>/` (single-structure directories left by labelling), `*.pkl` / `*.mat` / `*.backup`, and status files such as `still_running`, `USPEX_IS_DONE`, `octave-workspace`, `Warnings`, `ei.log` (`ei.log` is appended to, so keeping it would mix crystals selected by two runs into one file, and `gpevo ei-report` would plot them together).
 
-永远不删：`Specific/`、`Seeds/`、`INPUT.txt`、`MOL_*`、`results*/`（除 `-a`）、GP 训练数据目录 `<data>/`。目录里既没有 `INPUT.txt` 也没有 `CalcFold*` 时会拒绝执行，确认无误再加 `-f`。
+Never deleted: `Specific/`, `Seeds/`, `INPUT.txt`, `MOL_*`, `results*/` (unless `-a`), and the GP training-data directory `<data>/`. If a directory has neither `INPUT.txt` nor `CalcFold*`, the command refuses to run; add `-f` once you are sure.
 
-## 目录结构
+## Directory layout
 
 ```
-gpevo/                        # Python 包
+gpevo/                        # Python package
   FunctionFolder/
-    USPEX/                    # 核心进化算法（310 路径）
-    AbinitCode/               # GULP / SIESTA 接口与 I/O
-    Submission/               # 作业提交（本地子进程 / 集群调度器）
-    spacegroup/               # 对称性分析 + random_cell_mol（Cython 移植）
-    sys/  Tool/               # 系统工具函数
-  cli.py                      # 控制台入口（gpevo run / gpevo clean）
-  tools/                      # 子命令实现（clean.py）
+    USPEX/                    # core evolutionary algorithm (310 path)
+    AbinitCode/               # GULP / SIESTA interfaces and I/O
+    Submission/               # job submission (local subprocess / cluster scheduler)
+    spacegroup/               # symmetry analysis + random_cell_mol (Cython port)
+    sys/  Tool/               # system utility functions
+  cli.py                      # console entry point (gpevo run / gpevo clean)
+  tools/                      # subcommand implementations (clean.py)
   runtime.py  inputparser.py  log_utils.py  matrix.py  importers.py
-gpevo.py                      # 免安装入口（仓库根目录运行）
-compare_runs.py  plot_dft.py  # 结果绘图工具
-sg_coverage.py                # 空间群覆盖度统计
-ei_select.py                  # EI 日志
-example/  Specific/  train/  ebind/  docs/   # 示例、力场与文档
+gpevo.py                      # no-install entry point (run from the repository root)
+compare_runs.py  plot_dft.py  # result plotting tools
+sg_coverage.py                # space-group coverage statistics
+ei_select.py                  # EI log
+example/  Specific/  train/  ebind/  docs/   # examples, force fields and docs
 ```
 
-## 特征工程结论（有对照实验支撑）
+## Feature-engineering findings (backed by a controlled experiment)
 
-想知道"把结构指纹并入 GP 的 10 维特征能不能提精度"，答案是否定的，完整过程与脚本见
-[`docs/feature_ablation.md`](docs/feature_ablation.md)：
+Whether adding structure fingerprints to the GP's 10-D features improves accuracy: the answer is no. The full procedure and scripts are in
+[`docs/feature_ablation.md`](docs/feature_ablation.md):
 
-- 216 个真实 DFT 样本、5 折 CV、用生产核（ARD）实测：基线 R² 0.650（密度）/ 0.602（能量），**并入指纹后没有提升，甚至略降**。
-- **打乱指纹的对照给出同样（甚至更好）的分数** → 说明没有增量信号：10 维里的密度代理已与 DFT 密度 r=0.707，与指纹信息冗余。
-- 过程中还记录了一个陷阱：多维 GP **必须用 ARD 长度尺度**，各向同性核会塌成"预测均值"（R²≈0），曾据此得出过相反的错误结论。
+- 216 real DFT samples, 5-fold CV, measured with the production kernel (ARD): baseline R² 0.650 (density) / 0.602 (energy); **adding fingerprints gave no improvement, and even a slight decrease**.
+- **A control with shuffled fingerprints gave the same (or better) scores** → there is no incremental signal: the density proxy among the 10 dimensions already correlates with DFT density at r=0.707, which is redundant with fingerprint information.
+- A trap recorded along the way: a multi-dimensional GP **must use ARD length scales**; an isotropic kernel collapses to "predict the mean" (R²≈0), which once led to the opposite, wrong conclusion.
 
-复现：`python docs/feature_ablation.py --data ~/tnt22/data22`
+Reproduce with: `python docs/feature_ablation.py --data ~/tnt22/data22`
 
-## 设计文档
+## Design documents
 
-`docs/` 下有若干设计与原理说明：
+`docs/` holds several design and rationale notes:
 
-| 文件 | 内容 |
+| File | Contents |
 |---|---|
-| `ea_flowchart.md` / `ea_mechanism.png` / `draw_ea.py` | 进化算法流程图与绘制脚本 |
-| `uq_active_learning.md` / `uq_active_learning_flowchart.md` | GP 主动学习（UQ）流程 |
-| `fingerprint_method.md` | 指纹方法说明 |
-| `rl_bandit_design.md` | 强化学习 bandit 设计（原理推导 / 路线图） |
-| `rl_bandit_tutorial.md` | 强化学习模块使用教程（原理 + INPUT.txt 配置 / 单参数消融 / 解读） |
-| `molecule_damage_check.md` | 分子损坏检测的三道检查、1.780 Å 分子间 N–N 键漏检的原因与改进建议 |
-| `strain_matrix.md` | `Parents.strainMatrix` 的来历（晶格应变）、为何零读者、gpevo 不存它的影响面 |
-| `rotation_operator.md` | 旋转算子的两类旋转（刚体 vs 基团扭转）、默认角度（90° / ±90°·±60°·±30°）、`fracRotMut` 默认 0.1、呼吸晶格 10–20% |
-| `swarm_pso_coefficients.md` | `swarmInertia` / `swarmCognitive` 的取值推导：稳定三角形、收缩因子、量级核算与推荐值 |
-| `swarm_operator.md` | swarm 算子的算法原理（逐分子向当代最优插值 + 取向四元数 slerp + pbest/惯性）、与教科书 PSO / MATLAB PSO 的对照、对分子晶体的适用性、晶胞对齐 / MtypeLIST 断言 / 取向 slerp / pbest 惯性状态 的修复及剩余改进方向 |
-| `uspexkit-gp内核C优化原理与运行机制.pptx` | uspexkit GP 内核的 C 优化原理 |
+| `ea_flowchart.md` / `ea_mechanism.png` / `draw_ea.py` | Evolutionary-algorithm flowchart and the script that draws it |
+| `uq_active_learning.md` / `uq_active_learning_flowchart.md` | GP active-learning (UQ) pipeline |
+| `fingerprint_method.md` | Fingerprint method |
+| `rl_bandit_design.md` | Reinforcement-learning bandit design (derivation / roadmap) |
+| `rl_bandit_tutorial.md` | Reinforcement-learning module tutorial (principles + INPUT.txt configuration / single-parameter ablation / interpretation) |
+| `molecule_damage_check.md` | The three molecule-damage checks, why the 1.780 Å intermolecular N–N bond was missed, and suggested improvements |
+| `strain_matrix.md` | Where `Parents.strainMatrix` comes from (lattice strain), why it has zero readers, and the impact of gpevo not storing it |
+| `rotation_operator.md` | The two kinds of rotation (rigid-body vs group torsion), default angles (90° / ±90°·±60°·±30°), `fracRotMut` default 0.1, breathing lattice 10–20% |
+| `swarm_pso_coefficients.md` | Derivation of `swarmInertia` / `swarmCognitive`: stability triangle, constriction factor, order-of-magnitude check and recommended values |
+| `swarm_operator.md` | swarm operator algorithm (per-molecule interpolation toward the current best + orientation quaternion slerp + pbest/inertia), comparison with textbook PSO / MATLAB PSO, suitability for molecular crystals, and the fixes and remaining improvements around cell alignment / MtypeLIST assertions / orientation slerp / pbest inertia state |
+| `uspexkit-gp内核C优化原理与运行机制.pptx` | C optimisation principles of the uspexkit GP kernel |
 
-## 与 MATLAB 版的关系
+## Relationship to the MATLAB version
 
-MATLAB / OCTAVE 源码树不在本仓库内，Python 路径也不需要它们：不需要 `USPEXPATH` 环境变量，不需要配置 MATLAB path，入口只有 `gpevo` / `python -m gpevo` / `python gpevo.py` 三种。
+The MATLAB / OCTAVE source tree is not part of this repository, and the Python path does not need it either: no `USPEXPATH` environment variable, no MATLAB path configuration; the only entry points are `gpevo` / `python -m gpevo` / `python gpevo.py`.
 
 ## License
 
-MIT，见 [LICENSE](LICENSE)。
+MIT, see [LICENSE](LICENSE).
 
-## 链接
+## Links
 
-- 仓库：<https://gitee.com/fenggo/gpevo>
-- 作者：FengGo
+- Repository: <https://github.com/fenggo/gpevo>
+- Author: FengGo
