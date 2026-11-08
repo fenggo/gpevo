@@ -29,8 +29,8 @@ import numpy as np
 from gpevo.log_utils import console_print, write_log
 from gpevo.runtime import RESIDUAL_CUT
 from gpevo.FunctionFolder.USPEX.src.gp_ml import (
-    _expected_improvement, observed_density_incumbent, parse_gp_params,
-    UNCERT_SCALE,
+    _expected_improvement, gp_plot_enabled, observed_density_incumbent,
+    parse_gp_params, UNCERT_SCALE,
 )
 
 # muted, print-friendly palette (close to the denevo one)
@@ -133,8 +133,10 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
     """Draw the GP status figure of the current generation.
 
     Returns the path of the written PNG, or None when there is nothing to
-    draw (no GP metrics yet) or matplotlib is unavailable.  Never raises:
-    a plotting problem must not kill a running USPEX job.
+    draw (no GP metrics yet), matplotlib is unavailable, or the per-generation
+    figure is switched off (``0 : gpplot``, the default).  Even when the figure
+    is off, the extrapolation history and the terminal status report are still
+    written.  Never raises: a plotting problem must not kill a running USPEX job.
     """
     records = collect_records(POP)
     generation = int(getattr(POP, "generation", 0))
@@ -183,6 +185,14 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
                  "extrapolated": len(outside)})
     _save_history(hist_path, hist)
     dft_records = [r for r in records if r["dft"]]
+
+    # `0 : gpplot` (the default) keeps the history file and the terminal
+    # report but skips the figure itself.  An explicit out_path is a direct
+    # request for a PNG and is honoured regardless of the switch.
+    if out_path is None and not gp_plot_enabled(ORG):
+        _report(records, selected, f_best, top_density, inside, outside,
+                params, incumbent)
+        return None
 
     # ---- title -------------------------------------------------------------
     s0 = POP.POPULATION[0]

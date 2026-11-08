@@ -69,6 +69,7 @@ def createORGDefault():
     ORG.gpBackend = "sklearn"   # sklearn | gpytorch (opt-in GPyTorch backend)
     ORG.gpTrainingIter = 200    # max L-BFGS iterations per restart (gpytorch)
     ORG.gpLr = 0.1              # L-BFGS learning rate (gpytorch)
+    ORG.gpPlot = 0              # opt-in with `1 : gpplot` for gp_gen<N>.png
     ORG.opt_sign = 1
     ORG.dimension = 3
     ORG.molecule = 0

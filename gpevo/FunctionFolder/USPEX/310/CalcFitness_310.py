@@ -115,9 +115,11 @@ def CalcFitness_310():
     update_pbest(POP, fitness)
 
     # Native port of `uspexkit denevo`: draw the GP status figure from memory
-    # every generation that actually carries predictions from ``gp()``.  Before
-    # the training set is seeded there is nothing to draw and plot_gp_generation
-    # says so and returns.
+    # every generation that actually carries predictions from ``gp()``.  The
+    # figure is opt-in (`1 : gpplot`); with the default `0`, this call still
+    # writes gp_status_history.csv and prints the terminal status report.
+    # Before the training set is seeded there is nothing to draw and
+    # plot_gp_generation says so and returns.
     if int(getattr(POP, "generation", 0)) >= 1 and gp_enabled(ORG):
         try:
             from gpevo.FunctionFolder.USPEX.src.gp_plot import plot_gp_generation

@@ -37,7 +37,7 @@
 - **Molecule validity checks**: `newMolCheck`'s atom-pair distance scan also has a Cython kernel (`molcheck_cy.pyx`), about 85× faster on an 8-molecule system; it falls back to a pure-numpy implementation when the extension is not built.
 - **Cluster submission**: two paths, local subprocesses and remote schedulers, with MPI environment variables handled automatically.
 - **GP training-set bootstrap**: no need to prepare `feature_mlp.csv` / `feature.csv` / `structures.traj` up front — an empty (or even non-existent) directory is created automatically at the end of generation 1.
-- **Automatic plotting**: after each generation is evaluated, a four-panel GP status figure (`gp_gen*.png`) is written under `results*/`.
+- **GP status plots (opt-in)**: with `1 : gpplot` in `INPUT.txt`, each evaluated generation writes a four-panel figure (`gp_gen*.png`) under `results*/`. Off by default; `gp_status_history.csv` and the terminal GP status report are written either way.
 - **Result comparison tools**: `compare_runs.py` compares density/energy distributions across run directories, and `plot_dft.py` plots DFT results.
 
 ## Installation
@@ -90,7 +90,7 @@ gpevo                # or python -m gpevo
 |---|---|
 | `OUTPUT.txt` | Run log, including a per-generation `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` table; with GP enabled, four extra columns `Enthalpy(GP) UC Density(GP) UC` are appended |
 | `results1/Parameters.txt` | A byte-for-byte copy of `INPUT.txt` made at startup (the equivalent of the `cp` in MATLAB `Start.m:66`); written only once when a new `results<N>` is created, never overwritten on restart, so you can reconstruct the settings the run originally started with |
-| `results1/` (`results2/`, ...) | `gatheredPOSCARS`, `Individuals`, `Individuals.traj`, `origin`, `gp_gen*.png`, `density_predict.log` |
+| `results1/` (`results2/`, ...) | `gatheredPOSCARS`, `Individuals`, `Individuals.traj`, `origin`, `gp_status_history.csv`, `gp_gen*.png` (only with `1 : gpplot`), `density_predict.log` |
 | `CalcFold1/`, ... | Per-structure relaxation / GP working directories; `gp.csv` records every GP prediction |
 | `results*/<ID>/` | Working directory where a single structure is labelled by the reference method (SIESTA); empty directories left behind by an interrupted run are cleaned up automatically at the next selection |
 | `ei.log` | IDs of the crystals EI selected in each generation |
@@ -215,7 +215,7 @@ Each generation also prints a learning-curve line — **this line is the evidenc
 
 `LOO RMSE` is computed directly from the Cholesky factor of the already-fitted model via the hat-matrix identity (Rasmussen & Williams 5.12, no refitting needed); the hyperparameters are the ones fitted on all the data so far, so it is slightly optimistic. It shows `n/a` when the database exceeds 2000 rows, the cached uspexkit model cannot be found, or the backend is `gpytorch` (the hat-matrix identity needs sklearn's Cholesky factor / `alpha_`).
 
-When nothing grows, it also says which gate blocked it (`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`). The usual cause is that the reference method cannot run: labels depend on `siesta` (`mpirun`) + `<homePath>/Specific/*.psf`, and a missing one triggers an early warning at startup. Every generation also draws `results*/gp_gen*.png` (four panels: population distribution / exploration map / predicted vs adopted values / extrapolation check).
+When nothing grows, it also says which gate blocked it (`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`). The usual cause is that the reference method cannot run: labels depend on `siesta` (`mpirun`) + `<homePath>/Specific/*.psf`, and a missing one triggers an early warning at startup. With `1 : gpplot`, every generation also draws `results*/gp_gen*.png` (four panels: population distribution / exploration map / predicted vs adopted values / extrapolation check); this figure is off by default.
 
 > The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), vendored into `gpevo/uspexkit/` and called as an in-process API; changing the kernel means editing the vendored `core.py`. The default `sklearn` backend is the one used for MATLAB character-for-character parity. With `gpbackend : gpytorch` an opt-in GPyTorch model is trained instead — different kernel parameterisation and optimiser, so its numbers are not directly comparable and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and needs no external uspexkit install.
 

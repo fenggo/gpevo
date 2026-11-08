@@ -100,3 +100,6 @@ ei        : mode          % ei | random | uncertainty
 % gpytorch : gpbackend
 % 200      : gpiter
 % 0.1      : gplr
+% 可选：每代绘制四面板 GP 状态图 results*/gp_gen*.png（默认关闭）：
+% 不写此行 = 不产图，但仍写 gp_status_history.csv 与终端 GP status 报告。
+% 1        : gpplot

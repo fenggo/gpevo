@@ -529,3 +529,52 @@ def test_writeORG_labels_the_gp_step_gaussianprocess(tmp_path, monkeypatch):
 
     monkeypatch.setitem(G, "ORG_STRUC", make_org(0))
     assert "GaussianProcess" not in writeORG()
+
+
+def _pop_with_one_gp_record():
+    from gpevo.runtime import struct
+    ind = struct(Number=1, howCome="", gp={
+        "density_gp": 1.9, "uncertainty": 0.098, "residual": 1.0,
+        "dft": False, "energy_pred": -100.0, "uncertainty_eng": 0.1})
+    return struct(generation=2, POPULATION=[ind])
+
+
+def test_gpplot_is_off_by_default_and_opt_in(tmp_path):
+    org = _org_from_input(tmp_path, "1 : gp\n")
+    assert org.gpPlot == 0
+    assert gp_ml.gp_plot_enabled(org) is False
+
+    org_on = _org_from_input(tmp_path, "1 : gp\n1 : gpplot\n")
+    assert org_on.gpPlot == 1
+    assert gp_ml.gp_plot_enabled(org_on) is True
+
+
+def test_gpplot_off_skips_png_but_keeps_diagnostics(tmp_path, capsys):
+    from gpevo.FunctionFolder.USPEX.src import gp_plot
+
+    org = _org_from_input(tmp_path, "1 : gp\n")
+    org.resFolder = str(tmp_path / "results1")
+    os.makedirs(org.resFolder, exist_ok=True)
+
+    assert gp_plot.plot_gp_generation(org, _pop_with_one_gp_record()) is None
+    assert not list((tmp_path / "results1").glob("gp_gen*.png"))
+    assert (tmp_path / "results1" / "gp_status_history.csv").is_file()
+    assert "GP status" in capsys.readouterr().out
+
+
+def test_gpplot_on_writes_the_png(tmp_path, monkeypatch):
+    import matplotlib.figure
+    from gpevo.FunctionFolder.USPEX.src import gp_plot
+
+    def fake_savefig(self, *args, **kwargs):
+        with open(args[0], "w", encoding="utf-8") as fh:
+            fh.write("png")
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", fake_savefig)
+
+    org = _org_from_input(tmp_path, "1 : gp\n1 : gpplot\n")
+    org.resFolder = str(tmp_path / "results1")
+    os.makedirs(org.resFolder, exist_ok=True)
+
+    out = gp_plot.plot_gp_generation(org, _pop_with_one_gp_record())
+    assert out and out.endswith("gp_gen2.png")
+    assert os.path.isfile(out)

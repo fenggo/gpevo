@@ -35,7 +35,7 @@
 - **分子合法性检查**：`newMolCheck` 的原子对距离扫描也有 Cython 内核（`molcheck_cy.pyx`），8 分子体系约 85× 加速；扩展未编译时自动回退到纯 numpy 实现。
 - **集群提交**：本地子进程与远程调度器两条路径，MPI 环境变量自动处理。
 - **GP 训练集自举**：不需要预先准备 `feature_mlp.csv` / `feature.csv` / `structures.traj`，空目录（甚至不存在的目录）会在第一代结束时自动建起来。
-- **自动绘图**：每代评估完成后，在 `results*/` 生成四面板 GP 状态图（`gp_gen*.png`）。
+- **GP 状态图（可选）**：在 `INPUT.txt` 写 `1 : gpplot` 后，每代评估完成会在 `results*/` 生成四面板图（`gp_gen*.png`）。默认关闭；无论开关如何，`gp_status_history.csv` 和终端 GP status 报告照常输出。
 - **结果对比工具**：`compare_runs.py` 多运行目录的密度/能量分布对比，`plot_dft.py` DFT 结果绘图。
 
 ## 安装
@@ -88,7 +88,7 @@ gpevo                # 或 python -m gpevo
 |---|---|
 | `OUTPUT.txt` | 运行日志，含逐代 `ID Origin Composition Enthalpy Volume KPOINTS SYMMETRY` 表；GP 开启时追加 `Enthalpy(GP) UC Density(GP) UC` 四列 |
 | `results1/Parameters.txt` | 启动时 `INPUT.txt` 的字节级副本（对应 MATLAB `Start.m:66` 的 `cp`）；只在新建 `results<N>` 时写一次，重启不覆盖，用来复盘该次计算最初的设置 |
-| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`origin`、`gp_gen*.png`、`density_predict.log` |
+| `results1/`（`results2/`…） | `gatheredPOSCARS`、`Individuals`、`Individuals.traj`、`origin`、`gp_status_history.csv`、`gp_gen*.png`（仅 `1 : gpplot` 时）、`density_predict.log` |
 | `CalcFold1/`… | 每个结构的弛豫/GP 计算目录，`gp.csv` 记录每次 GP 预测 |
 | `results*/<ID>/` | 某个结构走参考方法（SIESTA）打标签的工作目录；上一轮中断留下的空目录会在下次选点时自动清理 |
 | `ei.log` | 每代 EI 选中的晶体 ID |
@@ -213,7 +213,7 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 
 `LOO RMSE` 用帽子矩阵恒等式从已拟合模型的 Cholesky 因子直接算（Rasmussen & Williams 5.12，无需重拟合），超参是全程数据上拟合的那套，所以偏乐观一点；库超过 2000 行、找不到 uspexkit 缓存的模型、或后端为 `gpytorch` 时显示 `n/a`（帽子矩阵恒等式依赖 sklearn 的 Cholesky 因子 / `alpha_`）。
 
-没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板）。
+没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。写 `1 : gpplot` 后每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板），默认关闭。
 
 > GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），已 vendored 到 `gpevo/uspexkit/` 并以进程内 API 方式调用；改内核只需编辑仓库内这份 `core.py`。默认 `sklearn` 后端是 MATLAB 字符级对拍用的那一套。设 `gpbackend : gpytorch` 时改用可选的 GPyTorch 模型——核参数化与优化器都不同，数值不可直接比较，学习曲线打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不需要外部安装 uspexkit。
 

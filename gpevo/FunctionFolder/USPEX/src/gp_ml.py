@@ -479,6 +479,16 @@ def gp_enabled(ORG):
     return int(getattr(ORG, "gp", 0) or 0) == 1
 
 
+def gp_plot_enabled(ORG):
+    """True when INPUT.txt enabled the per-generation GP status figure.
+
+    Off by default (``0 : gpplot`` or the option absent): no ``gp_gen<N>.png``
+    is written, but ``gp_status_history.csv`` and the terminal GP status
+    report still are, so the run keeps its diagnostics.
+    """
+    return int(getattr(ORG, "gpPlot", 0) or 0) == 1
+
+
 def is_gp_step(ORG, step):
     """True for the extra GP step appended after the relaxation steps."""
     return gp_enabled(ORG) and int(step) == len(getattr(ORG, "abinitioCode", []) or [])
