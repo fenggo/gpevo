@@ -192,6 +192,8 @@ Which quantity EI uses as its acquisition function is decided by `optType`:
 
 `den` (density gate) is unaffected and always applies to the predicted density; `u` (±1.96σ) applies to the σ of the corresponding acquisition target, so with optType 1 its unit is energy (eV) and should be tuned to the scale of the energy uncertainty. When no structure in a generation has a usable energy prediction (an old `gp.csv`, or `gp()` failed), a note is printed and it falls back to density.
 
+With `1 : gp`, optType 1 also ranks on the GP-predicted enthalpy for **fitness** itself (`use_gp_energy` in `CalcFitness_310`), not the force-field enthalpy the relaxation leaves in `Enthalpies`; optType 11 has the equivalent `use_gp_density`. `Enthalpies` stays unchanged and is still used for the failed-structure check.
+
 Pipeline:
 
 1. **Bootstrap (end of generation 1)**: when the training database has fewer than 2 rows, take the top `nboot` structures by fitness, let `uspexkit.calc()` compute their energies/densities with the reference method (SIESTA), and build `<homePath>/<data>/{feature_mlp.csv, feature.csv, structures.traj}` automatically. The GP step is skipped entirely for this generation (no structure fails).

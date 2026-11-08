@@ -190,6 +190,8 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 
 `den`（密度门）不受此影响，始终作用在预测密度上；`u`（±1.96σ）则作用在对应采集量的 σ 上，因此 optType 1 时它的单位是能量（eV），按能量不确定度的量级调即可。整代没有一个结构带可用的能量预测时（老 gp.csv 或 gp() 失败），会打印一行提示并退回密度。
 
+开启 `1 : gp` 时，optType 1 的 **fitness** 本身也用 GP 预测焓（`CalcFitness_310` 的 `use_gp_energy`），而不是弛豫留在 `Enthalpies` 里的力场焓；optType 11 有对应的 `use_gp_density`。`Enthalpies` 保持原值，仍用于失败结构判定。
+
 流程：
 
 1. **自举（第一代末）**：训练库不足 2 行时，按适应度取前 `nboot` 个结构，`uspexkit.calc()` 用参考方法（SIESTA）算它们的能量/密度，自动建起 `<homePath>/<data>/{feature_mlp.csv, feature.csv, structures.traj}`。这一代 GP 步整体跳过（无任何结构失败）。

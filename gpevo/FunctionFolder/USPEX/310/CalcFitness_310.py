@@ -10,6 +10,7 @@ from gpevo.matrix import det
 from gpevo.FunctionFolder.sys.elementMass import calc_density
 from gpevo.FunctionFolder.USPEX.src.gp_ml import gp_active_learning, gp_enabled
 from .use_gp_density import use_gp_density
+from .use_gp_energy import use_gp_energy
 
 
 def _usable(value):
@@ -35,6 +36,14 @@ def CalcFitness_310():
             factor = sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))
             if factor <= 0:
                 factor = 1.0
+            # optType 1 minimises the enthalpy, so with the GP enabled the
+            # fitness is the GP-predicted enthalpy (the same quantity EI ranks
+            # on), not the force-field value left in Enthalpies by Reading.
+            # optType 11 has the equivalent use_gp_density in its own branch.
+            # Enthalpies itself stays untouched: it is still used for the
+            # failed-structure check below.
+            if gp_enabled(ORG):
+                enthalpy = use_gp_energy(s, enthalpy)
             fitness[i] = enthalpy / factor
         elif ORG.optType == 11:                              # density
             volume = det(np.asarray(s.LATTICE).reshape(3, 3))
