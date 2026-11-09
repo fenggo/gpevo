@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820"
+     width="1400" height="820" role="img"
+     aria-label="Graphical abstract: UQ-driven active learning closed loop inside USPEX">
+  <!--
+    Graphical abstract for
+    "Uncertainty-Quantification-Driven Active Learning for Crystal Structure Prediction"
+    (docs/uq_active_learning.md).
+
+    Hand-written vector source. Render a print-ready PNG with:
+      rsvg-convert -w 2800 -h 1640 -o docs/assets/graphical_abstract.png \
+                   docs/assets/graphical_abstract.svg
+    Palette follows gpevo/tools/ei_report.py (USPEX blue / GP purple / DFT orange / data green).
+  -->
+  <defs>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="9" refY="5"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1a5276"/>
+    </marker>
+    <marker id="arwSoft" markerWidth="8" markerHeight="8" refX="7" refY="4"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#7f9cb5"/>
+    </marker>
+    <style>
+      .title  { font-family: Helvetica, Arial, sans-serif; font-size: 33px; font-weight: 700; fill: #16232e; }
+      .sub    { font-family: Helvetica, Arial, sans-serif; font-size: 16px; fill: #5d6d7e; }
+      .band   { font-family: Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #1a5276; }
+      .bandt  { font-family: Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #22394a; }
+      .bandb  { font-family: Helvetica, Arial, sans-serif; font-size: 11px; fill: #6b8091; }
+      .cap    { font-family: Helvetica, Arial, sans-serif; font-size: 13px; fill: #5d6d7e; }
+      .ctitle { font-family: Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #16232e; }
+      .cbody  { font-family: Helvetica, Arial, sans-serif; font-size: 13px; fill: #52616f; }
+      .num    { font-family: Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; fill: #ffffff; }
+      .ctr    { font-family: Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; fill: #1a5276; }
+      .pill   { font-family: Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; }
+      .foot   { font-family: Helvetica, Arial, sans-serif; font-size: 12px; fill: #93a1ad; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="820" fill="#ffffff"/>
+
+  <!-- ── title ─────────────────────────────────────────────────────── -->
+  <text class="title" x="70" y="62">UQ-Driven Active Learning for Crystal Structure Prediction</text>
+  <text class="sub"   x="70" y="92">A closed Gaussian-process / DFT loop inside the USPEX evolutionary search</text>
+  <line x1="70" y1="110" x2="1330" y2="110" stroke="#e3e9ee" stroke-width="2"/>
+
+  <!-- ── USPEX relaxation band ─────────────────────────────────────── -->
+  <rect x="70" y="128" width="1260" height="118" rx="14" fill="#eef4fa" stroke="#cbddea" stroke-width="1.5"/>
+  <text class="band" x="92" y="152">USPEX 310  ·  generation g  ·  molecular-crystal evolutionary search</text>
+
+  <!-- five small steps -->
+  <g>
+    <rect x="92"   y="168" width="226" height="62" rx="8" fill="#ffffff" stroke="#d5e2ed"/>
+    <text class="bandt" x="104" y="192">Evolutionary variation</text>
+    <text class="bandb" x="104" y="212">6 variation operators · elitism</text>
+
+    <rect x="336"  y="168" width="226" height="62" rx="8" fill="#ffffff" stroke="#d5e2ed"/>
+    <text class="bandt" x="348" y="192">1  GULP coarse relaxation</text>
+    <text class="bandb" x="348" y="212">cheap local optimisation</text>
+
+    <rect x="580"  y="168" width="226" height="62" rx="8" fill="#ffffff" stroke="#d5e2ed"/>
+    <text class="bandt" x="592" y="192">2  Broken-molecule repair</text>
+    <text class="bandb" x="592" y="212">Z-matrix / distance validity check</text>
+
+    <rect x="824"  y="168" width="226" height="62" rx="8" fill="#ffffff" stroke="#d5e2ed"/>
+    <text class="bandt" x="836" y="192">3  GULP fine relaxation</text>
+    <text class="bandb" x="836" y="212">refined geometry &amp; density</text>
+
+    <rect x="1068" y="168" width="226" height="62" rx="8" fill="#f3eafa" stroke="#d9c6e8"/>
+    <text class="bandt" x="1080" y="192">4  GP prediction &amp; screening</text>
+    <text class="bandb" x="1080" y="212">10-D ReaxFF descriptors → μ, σ</text>
+  </g>
+  <g stroke="#7f9cb5" stroke-width="1.6" fill="none" marker-end="url(#arwSoft)">
+    <line x1="318" y1="199" x2="334" y2="199"/>
+    <line x1="562" y1="199" x2="578" y2="199"/>
+    <line x1="806" y1="199" x2="822" y2="199"/>
+    <line x1="1050" y1="199" x2="1066" y2="199"/>
+  </g>
+
+  <!-- ── hand-off from the EA into the loop ─────────────────────────── -->
+  <line x1="260" y1="246" x2="260" y2="282" stroke="#1a5276" stroke-width="2"
+        marker-end="url(#arw)"/>
+  <text class="cap" x="282" y="269">after fitness evaluation  ·  query the GP posterior</text>
+
+  <!-- ── main closed loop: 6 cards ─────────────────────────────────── -->
+  <!-- arrows (drawn first so they sit under the cards) -->
+  <g stroke="#1a5276" stroke-width="2.2" fill="none" marker-end="url(#arw)">
+    <line x1="450" y1="363" x2="506" y2="363"/>
+    <line x1="890" y1="363" x2="946" y2="363"/>
+    <line x1="1140" y1="434" x2="1140" y2="524"/>
+    <line x1="950" y1="599" x2="894" y2="599"/>
+    <line x1="510" y1="599" x2="454" y2="599"/>
+    <line x1="260" y1="528" x2="260" y2="438"/>
+  </g>
+
+  <!-- centre badge -->
+  <circle cx="700" cy="481" r="47" fill="#f7fafc" stroke="#cdd9e3"
+          stroke-width="1.5"/>
+  <text class="ctr" x="700" y="476" text-anchor="middle">UQ-driven</text>
+  <text class="ctr" x="700" y="495" text-anchor="middle">closed loop</text>
+
+  <!-- 1 · GP surrogates -->
+  <g>
+    <rect x="70" y="292" width="380" height="142" rx="14" fill="#ffffff" stroke="#d9c6e8" stroke-width="1.5"/>
+    <rect x="70" y="293" width="5" height="140" rx="2" fill="#8e44ad"/>
+    <circle cx="100" cy="324" r="15" fill="#8e44ad"/>
+    <text class="num" x="100" y="329" text-anchor="middle">1</text>
+    <text class="ctitle" x="126" y="330">GP surrogates</text>
+    <text class="cbody" x="94" y="362">Density (Matern 5/2) + energy (RBF) GPR</text>
+    <text class="cbody" x="94" y="384">10-D ReaxFF descriptors · Δ-learning</text>
+    <text class="cbody" x="94" y="406">posterior mean μ with uncertainty σ</text>
+  </g>
+
+  <!-- 2 · Fitness & candidate -->
+  <g>
+    <rect x="510" y="292" width="380" height="142" rx="14" fill="#ffffff" stroke="#c9dcec" stroke-width="1.5"/>
+    <rect x="510" y="293" width="5" height="140" rx="2" fill="#2980b9"/>
+    <circle cx="540" cy="324" r="15" fill="#2980b9"/>
+    <text class="num" x="540" y="329" text-anchor="middle">2</text>
+    <text class="ctitle" x="566" y="330">Fitness &amp; candidate</text>
+    <text class="cbody" x="534" y="362">evaluate the population fitness</text>
+    <text class="cbody" x="534" y="384">best candidate (fitness &lt; 1e5)</text>
+    <text class="cbody" x="534" y="406">rank by expected improvement / σ</text>
+  </g>
+
+  <!-- 3 · Uncertainty gate -->
+  <g>
+    <rect x="950" y="292" width="380" height="142" rx="14" fill="#ffffff" stroke="#d9c6e8" stroke-width="1.5"/>
+    <rect x="950" y="293" width="5" height="140" rx="2" fill="#8e44ad"/>
+    <circle cx="980" cy="324" r="15" fill="#8e44ad"/>
+    <text class="num" x="980" y="329" text-anchor="middle">3</text>
+    <text class="ctitle" x="1006" y="330">Uncertainty gate</text>
+    <text class="cbody" x="974" y="362">query the posterior σ of the candidate</text>
+    <text class="cbody" x="974" y="384">σ &gt; u  →  trigger active learning</text>
+    <text class="cbody" x="974" y="406">else keep the current prediction</text>
+  </g>
+
+  <!-- 4 · DFT labelling -->
+  <g>
+    <rect x="950" y="528" width="380" height="142" rx="14" fill="#ffffff" stroke="#f0cdb6" stroke-width="1.5"/>
+    <rect x="950" y="529" width="5" height="140" rx="2" fill="#d35400"/>
+    <circle cx="980" cy="560" r="15" fill="#d35400"/>
+    <text class="num" x="980" y="565" text-anchor="middle">4</text>
+    <text class="ctitle" x="1006" y="566">DFT labelling</text>
+    <text class="cbody" x="974" y="598">trajectory generation</text>
+    <text class="cbody" x="974" y="620">reference calculation (SIESTA)</text>
+    <text class="cbody" x="974" y="642">append the labelled structure to the database</text>
+  </g>
+
+  <!-- 5 · Retrain -->
+  <g>
+    <rect x="510" y="528" width="380" height="142" rx="14" fill="#ffffff" stroke="#bfe3cf" stroke-width="1.5"/>
+    <rect x="510" y="529" width="5" height="140" rx="2" fill="#27ae60"/>
+    <circle cx="540" cy="560" r="15" fill="#27ae60"/>
+    <text class="num" x="540" y="565" text-anchor="middle">5</text>
+    <text class="ctitle" x="566" y="566">Retrain the GP</text>
+    <text class="cbody" x="534" y="598">invalidate the cached models</text>
+    <text class="cbody" x="534" y="620">refit on the augmented dataset</text>
+    <text class="cbody" x="534" y="642">training set grows every generation</text>
+  </g>
+
+  <!-- 6 · Feedback -->
+  <g>
+    <rect x="70" y="528" width="380" height="142" rx="14" fill="#ffffff" stroke="#c2d2de" stroke-width="1.5"/>
+    <rect x="70" y="529" width="5" height="140" rx="2" fill="#1a5276"/>
+    <circle cx="100" cy="560" r="15" fill="#1a5276"/>
+    <text class="num" x="100" y="565" text-anchor="middle">6</text>
+    <text class="ctitle" x="126" y="566">Feedback to the EA</text>
+    <text class="cbody" x="94" y="598">re-predict the population</text>
+    <text class="cbody" x="94" y="620">update fitness with the refined μ</text>
+    <text class="cbody" x="94" y="642">→ next generation of the search</text>
+  </g>
+
+  <!-- ── take-away pills ───────────────────────────────────────────── -->
+  <g>
+    <rect x="70"  y="706" width="380" height="44" rx="22" fill="#f3eafa"/>
+    <text class="pill" x="260" y="733" text-anchor="middle" fill="#8e44ad">σ is the trigger, not the target</text>
+
+    <rect x="510" y="706" width="380" height="44" rx="22" fill="#e8f6ee"/>
+    <text class="pill" x="700" y="733" text-anchor="middle" fill="#1e8449">training set grows autonomously</text>
+
+    <rect x="950" y="706" width="380" height="44" rx="22" fill="#eaf1f7"/>
+    <text class="pill" x="1140" y="733" text-anchor="middle" fill="#1a5276">closed loop across generations</text>
+  </g>
+
+  <text class="foot" x="70" y="788">GPEvo  ·  pure-Python USPEX-GP with Gaussian-process-guided active learning</text>
+  <text class="foot" x="1330" y="788" text-anchor="end">docs/uq_active_learning.md</text>
+</svg>
