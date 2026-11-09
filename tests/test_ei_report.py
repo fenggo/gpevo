@@ -159,11 +159,97 @@ def test_evolution_legend_names_the_markers(run):
 
     fig, ax = report_module._evolution_figure(summary, rows, dft)
     texts = [text.get_text() for text in ax.get_legend().get_texts()]
-    assert any("EI-selected" in t for t in texts), texts
-    assert any("DFT density" in t for t in texts), texts
-    assert any("best so far" in t for t in texts), texts
+    assert "Density of all validate structures (MLP)" in texts, texts
+    assert "EI-selected" in texts, texts
+    assert "DFT density of EI-selected" in texts, texts
+    assert "best of the generation" in texts, texts   # kept
+    assert "best so far" not in texts, texts          # line removed
+    assert not any("(" in t and "MLP)" not in t for t in texts), texts
     import matplotlib.pyplot as plt
     plt.close(fig)
+
+
+def test_build_summary_top10_sigma_uses_highest_gp_densities():
+    """TOP-10 is ranked by density_gp, not by σ or by crystal id."""
+    rows = [(1, cid, -1.0, 100.0, 1.8, -1.8) for cid in range(1, 13)]
+    gen_ids = {1: list(range(1, 13))}
+    pred = {
+        cid: {"residual": 0.1, "density_gp": 1.70 + 0.01 * cid,
+              # 1.96σ = 0.005 * (13 - cid): the densest are the most certain
+              "std": 0.005 * (13 - cid) / report_module.UNCERT_SCALE}
+        for cid in range(1, 13)
+    }
+    summary = report_module.build_summary(rows, gen_ids, pred, {}, {})
+
+    expected = sum(0.005 * (13 - cid) for cid in range(3, 13)) / 10
+    assert summary[1]["sigma_top10"] == pytest.approx(expected)
+    assert summary[1]["sigma_mean"] == pytest.approx(
+        sum(0.005 * (13 - cid) for cid in range(1, 13)) / 12)
+    assert summary[1]["sigma_top10"] < summary[1]["sigma_mean"]
+
+
+def test_build_summary_ei_uc_uses_only_the_ei_picks():
+    """The purple curve is the EI picks' mean UC, not the whole population's."""
+    rows = [(1, cid, -1.0, 100.0, 1.8, -1.8) for cid in range(1, 6)]
+    gen_ids = {1: [1, 2, 3, 4, 5]}
+    pred = {
+        cid: {"residual": 0.1, "density_gp": 1.8,
+              "std": 0.01 * cid / report_module.UNCERT_SCALE}
+        for cid in range(1, 6)
+    }
+    summary = report_module.build_summary(rows, gen_ids, pred, {}, {1: [5, 3]})
+
+    assert summary[1]["sigma_ei"] == pytest.approx((0.05 + 0.03) / 2)
+    assert summary[1]["sigma_mean"] == pytest.approx(0.03)
+    assert summary[1]["sigma_ei"] != pytest.approx(summary[1]["sigma_mean"])
+
+
+def test_learning_plot_draws_the_top10_curve(run, tmp_path, monkeypatch):
+    import matplotlib.figure
+    path, res, _densities, _picks = run
+    captured = {}
+
+    def fake_savefig(self, *args, **kwargs):
+        captured["fig"] = self
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", fake_savefig)
+
+    rows, gen_ids = report_module.parse_individuals(str(res / "Individuals"))
+    pred = report_module.parse_output_gp(str(res / "OUTPUT.txt"))
+    dft = report_module.parse_density_log(str(res / "density.log"))
+    ei_log = report_module.parse_ei_log(os.path.join(path, "ei.log"))
+    summary = report_module.build_summary(rows, gen_ids, pred, dft, ei_log)
+    learning = report_module.parse_learning_curve(os.path.join(path, "log"))
+
+    assert "Saved" in report_module.plot_learning(
+        summary, learning, str(tmp_path / "learning.png"))
+    ax = captured["fig"].axes[0]
+    labels = [line.get_label() for line in ax.get_lines()]
+    assert "mean UC of EI selected" in labels, labels
+    assert "mean UC of TOP-10 cocrystal" in labels, labels
+    assert "(" not in "".join(labels), labels      # no parenthetical suffixes
+    assert ax.get_title() == "", ax.get_title()
+    assert len(captured["fig"].axes) == 2          # twin kept when data exists
+
+
+def test_learning_plot_omits_the_right_axis_without_data(run, tmp_path, monkeypatch):
+    """No GP learning curve lines -> no meaningless 0-1 axis on the right."""
+    import matplotlib.figure
+    path, res, _densities, _picks = run
+    captured = {}
+
+    def fake_savefig(self, *args, **kwargs):
+        captured["fig"] = self
+    monkeypatch.setattr(matplotlib.figure.Figure, "savefig", fake_savefig)
+
+    rows, gen_ids = report_module.parse_individuals(str(res / "Individuals"))
+    pred = report_module.parse_output_gp(str(res / "OUTPUT.txt"))
+    dft = report_module.parse_density_log(str(res / "density.log"))
+    ei_log = report_module.parse_ei_log(os.path.join(path, "ei.log"))
+    summary = report_module.build_summary(rows, gen_ids, pred, dft, ei_log)
+
+    assert "Saved" in report_module.plot_learning(
+        summary, {}, str(tmp_path / "learning.png"))
+    assert len(captured["fig"].axes) == 1, captured["fig"].axes
 
 
 def test_ei_report_writes_the_three_figures(run, tmp_path):
@@ -202,6 +288,9 @@ def test_convergence_plots_generation_on_the_y_axis(run):
     assert any(isinstance(c, ErrorbarContainer) for c in ax.containers)
     texts = [t.get_text() for t in ax.get_legend().get_texts()]
     assert any("1.96" in t for t in texts), texts
+    assert ax.get_title() == "", ax.get_title()
+    assert "best so far" in texts, texts
+    assert not any("best so far (" in t for t in texts), texts
     plt.close(fig)
 
 

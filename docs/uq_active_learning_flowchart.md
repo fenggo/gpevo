@@ -122,11 +122,13 @@ flowchart LR
 
 | 图 / 量 | 数据源 | 解析入口 |
 |---|---|---|
-| 结构密度 ρ_ML（灰点、best-so-far） | `results<N>/Individuals` | `parse_individuals()` |
-| **GP 均值 μ 与不确定度**（紫色方块、误差棒、σ 曲线） | **`results<N>/OUTPUT.txt`** 每代 SUMMARY 表尾的 `Enthalpy(GP) UC Density(GP) UC Residual` | `parse_output_gp()` |
+| 结构密度 ρ_ML（evolution 图灰点 / 逐代最优；convergence 图的 best-so-far 阶梯线） | `results<N>/Individuals` | `parse_individuals()` |
+| **GP 均值 μ 与不确定度**（紫色方块、误差棒） | **`results<N>/OUTPUT.txt`** 每代 SUMMARY 表尾的 `Enthalpy(GP) UC Density(GP) UC Residual` | `parse_output_gp()` |
+| EI 选中晶体的平均 UC（紫色实线，`_learning.png`） | 同上，但只取 `ei.log` 里该代 EI 选中的 id 求 1.96σ 均值（全代平均 `sigma_mean` 仍只在终端报告里用） | `build_summary()['sigma_ei']` → `plot_learning()` |
+| TOP-10 平均不确定度（蓝色虚线，`_learning.png`） | 同上，每代按 `density_gp` 降序取前 10 个有效预测后求 1.96σ 均值 | `build_summary()['sigma_top10']` → `plot_learning()` |
 | DFT 参考密度（红菱形） | `results<N>/density.log` | `parse_density_log()` |
 | EI 选中的 id | `results<N>/ei.log`（回退运行根目录） | `parse_ei_log()` |
-| labels / LOO RMSE（绿柱、橙线） | `log` 或 `OUTPUT.txt` 的 `GP learning curve` 行 | `parse_learning_curve()` |
+| labels / LOO RMSE（绿柱、橙线，右轴） | `log` 或 `OUTPUT.txt` 的 `GP learning curve` 行 | `parse_learning_curve()`；无这些行时 `plot_learning()` 不创建右轴 |
 
 **口径要点**：
 

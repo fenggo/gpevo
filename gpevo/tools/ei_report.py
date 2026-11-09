@@ -11,9 +11,8 @@ recomputed here:
 
 Three panels:
 
-1. **Evolution** -- every structure as a dot, the per-generation maximum and
-   the best-so-far step curve, with the EI-selected crystals circled and the
-   DFT-verified ones as diamonds.
+1. **Evolution** -- every structure as a dot and the per-generation maximum,
+   with the EI-selected crystals circled and the DFT-verified ones as diamonds.
 2. **Convergence** -- the EI selection trend: every EI-labelled crystal is one
    purple square at its generation (x) holding the GP prediction EI ranked on
    (y) and the ±1.96σ uncertainty of *that* prediction as the error bar; dots
@@ -232,6 +231,15 @@ def build_summary(rows, gen_ids, pred, dft, ei_log):
         gp = [pred[cid] for cid in ids
               if cid in pred and pred[cid]["residual"] <= RESIDUAL_CUT]
         sigmas = [UNCERT_SCALE * entry["std"] for entry in gp]
+        # TOP-10 by the GP-predicted density the search ranks on (the same
+        # convention as ei_select.build_per_gen / gp_plot's top-5).  Exclude
+        # non-finite rows so a NaN cannot be sorted into the leading group.
+        ranked = sorted(
+            (e for e in gp if math.isfinite(e["density_gp"])
+             and math.isfinite(e["std"])),
+            key=lambda e: -e["density_gp"])[:10]
+        sigma_top10 = (sum(UNCERT_SCALE * e["std"] for e in ranked) / len(ranked)
+                       if ranked else float("nan"))
         picks = []
         for cid in ei_log.get(gen, []):
             entry = pred.get(cid, {})
@@ -242,6 +250,11 @@ def build_summary(rows, gen_ids, pred, dft, ei_log):
                 "sigma": UNCERT_SCALE * entry.get("std", float("nan")),
                 "dft": dft.get(cid, (float("nan"), float("nan")))[0],
             })
+        # The purple learning curve is the mean UC of the EI-selected crystals
+        # only, not the whole predicted population (sigma_mean below).
+        pick_uc = [p["sigma"] for p in picks if math.isfinite(p["sigma"])]
+        sigma_ei = (sum(pick_uc) / len(pick_uc)
+                    if pick_uc else float("nan"))
         summary[gen] = {
             "ids": ids,
             "n": len(densities),
@@ -249,6 +262,8 @@ def build_summary(rows, gen_ids, pred, dft, ei_log):
             "mean": sum(densities) / len(densities) if densities else float("nan"),
             "gp_mean": sum(e["density_gp"] for e in gp) / len(gp) if gp else float("nan"),
             "sigma_mean": sum(sigmas) / len(sigmas) if sigmas else float("nan"),
+            "sigma_ei": sigma_ei,
+            "sigma_top10": sigma_top10,
             "n_gp": len(gp),
             "picks": picks,
         }
@@ -333,24 +348,18 @@ def _evolution_figure(summary, rows, dft):
                 continue
             ax.scatter(gen + offset, row[4], s=9, color="#bdc3c7",
                        edgecolors="none", zorder=1)
-    ax.scatter([], [], s=9, color="#bdc3c7", label="structures (ML density)")
+    ax.scatter([], [], s=9, color="#bdc3c7",
+               label="Density of all validate structures (MLP)")
 
     maxima = [summary[gen]["max"] for gen in gens]
     ax.plot(gens, maxima, "o-", color="#2980b9", lw=1.8, ms=5, zorder=3,
             label="best of the generation")
 
-    best, running = float("-inf"), []
-    for value in maxima:
-        best = max(best, value)
-        running.append(best)
-    ax.step(gens, running, where="post", color="#1a5276", lw=2.2, zorder=4,
-            label="best so far")
-
     # The label goes on the first marker actually drawn, not on the first
     # generation: EI starts labelling at generation 2, so keying it to gens[0]
     # left both of these out of the legend entirely.
-    ei_label, dft_label = "EI-selected (sent to the reference calculation)", None
-    dft_label = "DFT density of that crystal (connected)"
+    ei_label, dft_label = "EI-selected", None
+    dft_label = "DFT density of EI-selected"
     for gen in gens:
         picks = summary[gen]["picks"]
         for pick, offset in zip(picks, _jitter(len(picks), span=0.16)):
@@ -435,8 +444,6 @@ def _convergence_figure(ei_series):
                 color="#c0392b")
         ax.set_xlabel("Generation")
         ax.set_ylabel(r"Density (g/cm$^3$)")
-        ax.set_title("EI selection trend across generations", fontsize=12,
-                     fontweight="bold")
         return fig, ax
 
     # best-so-far as generations advance, on the density the search computed
@@ -451,7 +458,7 @@ def _convergence_figure(ei_series):
     if ml_gens:
         ax.step(ml_gens, best, where="post", color="#1a5276", lw=1.6,
                 marker="o", ms=4, zorder=4,
-                label="best so far (Individuals density)")
+                label="best so far")
 
     # The ±1.96σ belongs to the GP mean, not to the MLP relaxation above: the
     # bar is what EI traded against the improvement term, so it goes on μ.
@@ -490,8 +497,6 @@ def _convergence_figure(ei_series):
 
     ax.set_xlabel("Generation")
     ax.set_ylabel(r"Density (g/cm$^3$)")
-    ax.set_title("EI selection trend across generations", fontsize=12,
-                 fontweight="bold")
     ax.set_xticks(sorted({entry["gen"] for entry in ei_series}))
     ax.grid(True, alpha=0.25, linestyle="--")
     handles, labels = ax.get_legend_handles_labels()
@@ -529,7 +534,7 @@ def plot_convergence(ei_series, out_png):
 
 
 def plot_learning(summary, learning, out_png):
-    """Per-generation σ of the population, labels and LOO RMSE of the model."""
+    """Per-generation mean UC of EI picks / TOP-10 by GP density, labels and LOO RMSE."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -538,45 +543,64 @@ def plot_learning(summary, learning, out_png):
         return f"  (learning plot skipped: matplotlib unavailable: {exc})"
 
     gens = sorted(summary)
-    sigmas = [summary[gen]["sigma_mean"] for gen in gens]
+    sigmas = [summary[gen].get("sigma_ei", float("nan")) for gen in gens]
+    top10 = [summary[gen].get("sigma_top10", float("nan")) for gen in gens]
     labelled = [learning.get(gen, {}).get("added", float("nan")) for gen in gens]
     rmses = [learning.get(gen, {}).get("rmse_density", float("nan")) for gen in gens]
-    if not any(map(math.isfinite, sigmas)) and not any(map(math.isfinite, rmses)):
+    if (not any(map(math.isfinite, sigmas))
+            and not any(map(math.isfinite, top10))
+            and not any(map(math.isfinite, rmses))):
         return "  (learning plot skipped: the run logged neither σ nor a LOO RMSE)"
 
     # Early generations before GP/density logging started carry no σ, RMSE or
     # labels, so they only widen the x-range with a blank left margin. Keep only
     # generations that actually have data, so the plot begins at the first one.
-    has_data = [any((math.isfinite(s), math.isfinite(l), math.isfinite(r)))
-                for s, l, r in zip(sigmas, labelled, rmses)]
+    has_data = [any((math.isfinite(s), math.isfinite(t),
+                     math.isfinite(l), math.isfinite(r)))
+                for s, t, l, r in zip(sigmas, top10, labelled, rmses)]
     if not any(has_data):
         return "  (learning plot skipped: no generation logged σ, RMSE or labels)"
     plot_gens = [g for g, ok in zip(gens, has_data) if ok]
     plot_sigmas = [s for s, ok in zip(sigmas, has_data) if ok]
+    plot_top10 = [t for t, ok in zip(top10, has_data) if ok]
     plot_labelled = [l for l, ok in zip(labelled, has_data) if ok]
     plot_rmses = [r for r, ok in zip(rmses, has_data) if ok]
 
     fig, ax = plt.subplots(figsize=(8.5, 5.0))
-    twin = ax.twinx()
+    # The second axis only holds LOO RMSE / label counts.  Without learning
+    # data an unconditional twinx() leaves a meaningless 0-1 scale on the
+    # right, so create it only when there is something to put on it.
+    has_twin = (any(map(math.isfinite, plot_rmses))
+                or any(map(math.isfinite, plot_labelled)))
+    twin = ax.twinx() if has_twin else None
     if any(map(math.isfinite, plot_sigmas)):
-        ax.plot(plot_gens, plot_sigmas, "o-", color="#8e44ad", lw=1.8, ms=5,
-                label="mean GP ±1.96σ (± density)")
+        pairs = [(g, s) for g, s in zip(plot_gens, plot_sigmas)
+                 if math.isfinite(s)]
+        ax.plot([g for g, _ in pairs], [s for _, s in pairs],
+                "o-", color="#8e44ad", lw=1.8, ms=5,
+                label="mean UC of EI selected")
         ax.set_ylabel(r"mean GP uncertainty (g/cm$^3$)", color="#8e44ad")
-    if any(map(math.isfinite, plot_rmses)):
+    if any(map(math.isfinite, plot_top10)):
+        pairs = [(g, t) for g, t in zip(plot_gens, plot_top10)
+                 if math.isfinite(t)]
+        ax.plot([g for g, _ in pairs], [t for _, t in pairs],
+                "^--", color="#2980b9", lw=1.6, ms=5,
+                label="mean UC of TOP-10 cocrystal")
+    if has_twin and any(map(math.isfinite, plot_rmses)):
         twin.plot(plot_gens, plot_rmses, "s--", color="#d35400", lw=1.6, ms=5,
                   label="LOO RMSE (density)")
         twin.set_ylabel(r"LOO RMSE (g/cm$^3$)", color="#d35400")
-    if any(map(math.isfinite, plot_labelled)):
+    if has_twin and any(map(math.isfinite, plot_labelled)):
         twin.bar(plot_gens, [0.0 if not math.isfinite(v) else v for v in plot_labelled],
                  width=0.5, color="#27ae60", alpha=0.25,
                  label="labels added in this generation")
     ax.set_xlabel("Generation")
     ax.set_xticks(plot_gens)
     ax.set_xlim(min(plot_gens) - 0.5, max(plot_gens) + 0.5)
-    ax.set_title("What the labels bought", fontsize=12, fontweight="bold")
     ax.grid(True, alpha=0.25, linestyle="--")
     main_handles, main_labels = ax.get_legend_handles_labels()
-    twin_handles, twin_labels = twin.get_legend_handles_labels()
+    twin_handles, twin_labels = (twin.get_legend_handles_labels()
+                                 if twin is not None else ([], []))
     handles, labels = main_handles + twin_handles, main_labels + twin_labels
     seen = {}
     for handle, label in zip(handles, labels):
