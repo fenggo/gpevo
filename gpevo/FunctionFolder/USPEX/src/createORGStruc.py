@@ -110,8 +110,6 @@ def createORGStruc(inputFile="INPUT.txt"):
     if raw is None:
         raw = ORG.populationSize
     ORG.initialPopSize = int(float(raw))
-    if ORG.initialPopSize <= 0:
-        ORG.initialPopSize = ORG.populationSize
 
     raw = p.scalar("repeatForStatistics")
     if raw is not None:
