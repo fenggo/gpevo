@@ -577,7 +577,7 @@ def plot_learning(summary, learning, out_png):
         ax.plot([g for g, _ in pairs], [s for _, s in pairs],
                 "o-", color="#8e44ad", lw=1.8, ms=5,
                 label="mean UC of EI selected")
-        ax.set_ylabel(r"mean GP uncertainty (g/cm$^3$)", color="#8e44ad")
+        ax.set_ylabel(r"mean GP uncertainty (g/cm$^3$)", color="black")
     if any(map(math.isfinite, plot_top10)):
         pairs = [(g, t) for g, t in zip(plot_gens, plot_top10)
                  if math.isfinite(t)]
