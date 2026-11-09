@@ -165,6 +165,7 @@ def test_evolution_legend_names_the_markers(run):
     assert "best of the generation" in texts, texts   # kept
     assert "best so far" not in texts, texts          # line removed
     assert not any("(" in t and "MLP)" not in t for t in texts), texts
+    assert ax.get_title() == "", ax.get_title()
     import matplotlib.pyplot as plt
     plt.close(fig)
 

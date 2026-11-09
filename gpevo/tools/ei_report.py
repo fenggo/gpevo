@@ -381,8 +381,6 @@ def _evolution_figure(summary, rows, dft):
 
     ax.set_xlabel("Generation")
     ax.set_ylabel(r"Density (g/cm$^3$)")
-    ax.set_title("Density evolution with the GP/EI selection", fontsize=12,
-                 fontweight="bold")
     ax.set_xticks(gens)
     ax.set_xlim(min(gens) - 0.6, max(gens) + 0.6)
     ax.grid(True, alpha=0.25, linestyle="--")
