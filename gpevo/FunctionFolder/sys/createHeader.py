@@ -22,7 +22,7 @@ USPEX_PIC = [
 ]
 VERSION = "Version 0.1.0"
 DESCRIPTION = "Evolutionary Algorithm Code for Structure Prediction"
-URL = "more info at https://gitee.com/fenggo/gpevo"
+URL = "more info at https://github.com/fenggo/gpevo"
 
 CITATION_HEAD = [
     "Please cite the following suggested papers",
@@ -40,6 +40,9 @@ CITATION_BODY = [
     "Lyakhov A.O., Oganov A.R., Stokes H., Zhu Q. (2013)",
     "New developments in evolutionary structure prediction algorithm USPEX.",
     "Comp. Phys. Comm., 184, 1172-1182",
+    "Guo F.,  Yang X.-Y., Chen F. (2027)",
+    "Gaussian Process Machine Learning Guided Evolutionary Crystal Structure Predictions",
+    " ",
 ]
 
 
