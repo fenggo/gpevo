@@ -248,6 +248,14 @@ def Start():
     working = os.getcwd()
     set_home(working)
 
+    # MATLAB's run-uspex.sh stops relaunching once USPEX_IS_DONE exists;
+    # gpevo has no shell wrapper, so the check lives at the entry point.
+    # Finish() also parks generation past numGenerations in the checkpoint,
+    # so a restart stays finished even if that flag file was cleaned away.
+    if os.path.exists("USPEX_IS_DONE"):
+        console_print("  USPEX IS DONE! (calculation already finished)")
+        return
+
     ORG = G["ORG_STRUC"]
     console_print("  ")
 

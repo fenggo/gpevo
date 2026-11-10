@@ -5,9 +5,9 @@ the user changed while the run was stopped is ignored -- the GP gates
 (``den``, ``u``, ``explore``) above all, since those are what gets tuned
 between restarts.
 
-``Start()`` itself is not run here: it would enter the generation loop.  The
-refresh helper is exercised directly, with a run directory that matches what
-a stopped run leaves behind.
+Only the finished-run guard of ``Start()`` is run here; the rest would enter
+the generation loop.  The refresh helper is exercised directly, with a run
+directory that matches what a stopped run leaves behind.
 """
 from __future__ import annotations
 
@@ -266,3 +266,18 @@ def test_zero_keeps_the_clock_seed():
 
     assert source == "clock"
     assert 0 <= seed < 2**31
+
+
+# ---- a finished run must not restart --------------------------------------
+
+def test_a_finished_run_does_not_restart(tmp_path, monkeypatch, capsys):
+    """USPEX_IS_DONE is MATLAB run-uspex.sh's stop flag; honour it here too."""
+    from gpevo.FunctionFolder.USPEX.Start import Start
+
+    monkeypatch.setattr("gpevo.runtime._HOME", None)   # set_home() writes this
+    (tmp_path / "USPEX_IS_DONE").write_text("1\n")
+
+    Start()
+
+    assert "already finished" in capsys.readouterr().out
+    assert not (tmp_path / "Current_POP.pkl").exists()

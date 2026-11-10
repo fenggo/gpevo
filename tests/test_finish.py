@@ -30,8 +30,10 @@ def run(tmp_path, monkeypatch):
 
         ORG = struct()
         ORG.resFolder = str(tmp_path)
+        ORG.numGenerations = 50
         POP = struct()
         POP.bodyCount = 610
+        POP.generation = 50
         ind = struct()
         ind.Enthalpies = [-1131.8]
         POP.POPULATION = [ind]
@@ -70,3 +72,14 @@ def test_finished_block_follows_the_relaxation_count(run):
     lines = run.read_text().splitlines()
     assert _RELAXATIONS in lines[-3]                 # blank line in between
     assert lines[-1].strip().startswith("Job Finished at")
+
+
+def test_finish_parks_the_generation_beyond_the_limit(run, tmp_path):
+    """Finish.m saves generation = numGenerations+1 so a restart quits at once."""
+    from gpevo.runtime import safeload
+
+    with pytest.raises(SystemExit):
+        Finish()
+
+    assert safeload("Current_POP.pkl").generation == 51
+    assert (tmp_path / "USPEX_IS_DONE").exists()

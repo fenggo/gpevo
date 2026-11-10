@@ -33,6 +33,15 @@ def Finish():
               f"structural relaxations\n")
     write_log("\n")
     write_log(f"            Job Finished at       {_job_finished_stamp():>30}\n")
+    # Finish.m parks the generation past the limit and saves the checkpoint
+    # before quitting: a restart loading it then sees EA_310's while-loop as
+    # false and does not produce another generation.  Leaving generation at
+    # its last value made restarting a finished run resume the search.
+    POP = G["POP_STRUC"]
+    POP.generation = int(ORG.numGenerations) + 1
+    from gpevo.runtime import safesave
+
+    safesave("Current_POP.pkl", POP)
     console_print("USPEX IS DONE!")
     with open("USPEX_IS_DONE", "w") as fp:
         fp.write("1\n")
