@@ -24,7 +24,7 @@ from .utils import (read_individuals, search_structure,generate_hbond_lib,
                             lammps_opt_mtp,
                             write_output,write_geometry)
 from pymatgen.io.ase import AseAtomsAdaptor
-from gpevo.runtime import RESIDUAL_CUT, RMSD_CUT
+from gpevo.runtime import RESIDUAL_CUT
 # from irff.md.lammps import writeLammpsData,writeLammpsIn,get_lammps_thermal,lammpstraj_to_ase
 from irff.md.gulp import write_gulp_in,get_reax_energy ,opt
 # from irff.dft.dftb import dftb_opt
@@ -50,27 +50,6 @@ def raw_residual(feature, d, scaler):
     X_ = scaler.transform(f)
     res = np.sum(np.square(np.asarray(d, dtype=float) - f), axis=1)
     return res, int(np.argmin(res)), X_
-
-
-def _geometry_rmsd(a, b):
-    """Periodic RMSD (Angstrom) between two structures in canonical atom order.
-
-    Fractional differences are wrapped into the minimum image and the best
-    rigid translation is removed, so a pure lattice translation / atom
-    wrap-around yields ~0.  The training trajectory is kept in a canonical
-    atom order (match_symbols.py); when the two structures disagree on atom
-    count or species sequence we return infinity, so the geometry check fails
-    safe (recompute DFT) instead of wrongly claiming a match.
-    """
-    if len(a) != len(b) or a.get_chemical_symbols() != b.get_chemical_symbols():
-        return float("inf")
-    cell = np.asarray(a.cell, dtype=float)
-    df = a.get_scaled_positions(wrap=True) - b.get_scaled_positions(wrap=True)
-    df -= np.round(df)          # minimum image
-    df -= df.mean(axis=0)       # best rigid translation
-    df -= np.round(df)
-    d = np.linalg.norm(df @ cell, axis=1)
-    return float(np.sqrt(np.mean(d ** 2)))
 
 
 def supercell(gen=None,traj=None,x=1,y=1,z=1,i=None):
@@ -941,7 +920,7 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
 # ──────────────────────────────────────────────
 
 def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
-         ncpu=8, dat="data", tolerance=0.01, rmsd_tol=RMSD_CUT, gen=None):
+         ncpu=8, dat="data", tolerance=0.01, gen=None):
     """
     High-throughput DFT calculation with structure matching.
 
@@ -952,8 +931,7 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
         step: MD steps
         ncpu: number of CPUs
         dat: data directory name
-        tolerance: feature-space matching tolerance
-        rmsd_tol: max periodic RMSD (Angstrom) for reusing a matched structure
+        tolerance: structure matching tolerance
         gen: generation number (None = latest generation)
     """
     images = Trajectory(t)
@@ -991,7 +969,6 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
 
         feature = np.array([e[0], e[1], e[5], e[8], e[10], e_cho[11], e_chn[11], e_chc[11],e[12], density])
 
-        best_idx, best_rmsd = None, float("inf")
         if exists("structures.traj"):
             data = np.loadtxt("feature_mlp.csv", delimiter=",", skiprows=1)
             data_ = np.loadtxt("feature.csv", delimiter=",", skiprows=1)
@@ -1002,14 +979,7 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
             except IndexError:
                 D = data[1:]
                 D_ = data_[1:]
-            ind, _, res_ = search_structure(feature, D, tolerance=tolerance)
-            # A small feature residual does not prove the structures are the
-            # same; re-check geometrically over every feature hit and reuse
-            # only the closest one (feature-nearest != geometry-nearest).
-            for i in (int(j) for j in ind[0]):
-                r = _geometry_rmsd(atoms_mlp, struc[i])
-                if r < best_rmsd:
-                    best_idx, best_rmsd = i, r
+            ind, imin, res_ = search_structure(feature, D, tolerance=tolerance)
         else:
             ind = [[]]
             with open("feature_mlp.csv", "w") as fd:
@@ -1022,26 +992,22 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
             res_ = 0.0
 
         chdir(work_dir)
-        if len(ind[0]) > 0 and best_rmsd <= rmsd_tol:
+        if len(ind[0]) > 0:
             atoms.write(f"POSCAR.{s}")
-            struc[best_idx].write(f"POSCAR.{s}_opt")
+            struc[imin].write(f"POSCAR.{s}_opt")
             if D.ndim == 2:
-                energy = D_[best_idx, 0]
-                density = D_[best_idx, -1]
+                energy = D_[imin, 0]
+                density = D_[imin, -1]
             else:
                 energy = D_[0]
                 density = D_[-1]
             print(f"{s:5d} mt {energy:9.4f} {feature[1]:9.4f} {feature[2]:9.4f} "
                   f"{feature[3]:9.4f} {feature[4]:9.4f} {feature[5]:9.4f} "
-                  f"{feature[6]:9.4f} {density:7.4f} {res_:7.4f}"
-                  f" rmsd:{best_rmsd:7.4f} idx:{best_idx}")
+                  f"{feature[6]:9.4f} {density:7.4f} {res_:7.4f}")
             traj_w = TrajectoryWriter(f"id_{s}.traj", mode="w")
-            traj_w.write(atoms=struc[best_idx])
+            traj_w.write(atoms=struc[imin])
             traj_w.close()
         else:
-            if len(ind[0]) > 0:
-                print(f"{s:5d} gx feature-hit({len(ind[0])}) but "
-                      f"rmsd:{best_rmsd:7.4f} > {rmsd_tol:7.4f}; running SIESTA")
             subprocess.call(f"cp {rootdir}/Specific/*.psf ./", shell=True)
             img = siesta_opt(atoms, ncpu=ncpu, us="F", VariableCell="true", tstep=step,
                              xcf="GGA", xca="PBE", basistype="split")
@@ -1063,8 +1029,7 @@ def calc(t="Individuals.traj", den=1.88, ids=None, step=500,
 
             print(f"{s:5d} cl {energy:9.4f} {feature[1]:9.4f} {feature[2]:9.4f} "
                   f"{feature[3]:9.4f} {feature[4]:9.4f} {feature[5]:9.4f} "
-                  f"{feature[6]:9.4f} {density:7.4f} {res_:7.4f}"
-                  f" rmsd:{best_rmsd:7.4f}")
+                  f"{feature[6]:9.4f} {density:7.4f} {res_:7.4f}")
 
             chdir(data_dir)
             with open("feature_mlp.csv", "a") as fd:
