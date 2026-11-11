@@ -20,6 +20,17 @@ from collections import defaultdict
 RESIDUAL_CUT = 10.0
 
 
+# Cutoff (Angstrom) for the geometry check applied AFTER a feature-space match
+# in uspexkit.core.calc().  A small feature residual only says two structures
+# have similar ReaxFF energy decomposition / density; it does not prove they
+# are the same structure.  Reuse the labelled DFT result only when the
+# periodic RMSD between the relaxed structures is <= RMSD_CUT.  Calibrated on
+# ct22/results3: same configuration 0.05-0.52 A (ReaxFF vs DFT relaxed),
+# different configurations >= 3.5 A, so 1.0 A leaves ~2x margin on both
+# sides.  Re-tune for a new system.
+RMSD_CUT = 1.0
+
+
 # ---------------------------------------------------------------------------
 # Struct helpers
 # ---------------------------------------------------------------------------

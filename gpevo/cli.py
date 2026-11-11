@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 
+from gpevo.runtime import RMSD_CUT
+
 
 def _build_parser():
     parser = argparse.ArgumentParser(
@@ -109,7 +111,9 @@ def _build_parser():
     parser_calc.add_argument("--data", "--dat", dest="data",
                              default="data", help="data directory name")
     parser_calc.add_argument("--tolerance", type=float, default=0.01,
-                             help="structure matching tolerance")
+                             help="feature-space matching tolerance")
+    parser_calc.add_argument("--rmsd-tol", type=float, default=RMSD_CUT,
+                             help="max periodic RMSD (Angstrom) to reuse a matched structure")
     parser_calc.add_argument("--gen", type=int, default=None,
                              help="generation number")
 
@@ -262,7 +266,7 @@ def main(argv=None):
         from gpevo.uspexkit.core import calc
         calc(t=args.t, den=args.den, ids=args.ids, step=args.step,
              ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance,
-             gen=args.gen)
+             rmsd_tol=args.rmsd_tol, gen=args.gen)
         return
     if args.command == "calcdata":
         from gpevo.uspexkit.core import calcdata
