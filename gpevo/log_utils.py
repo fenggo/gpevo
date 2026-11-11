@@ -32,6 +32,21 @@ def console_print(*args, **kwargs):
     _ORIGINAL_PRINT(*args, **kwargs)
 
 
+def tee_print(*args, sep=" ", end="\n", **kwargs):
+    """Print to the terminal AND to the active USPEX log (OUTPUT.txt).
+
+    Unlike ``console_print`` (MATLAB ``disp`` semantics, terminal only), this
+    is for Python-side diagnostics that must also be archived in the log.
+    Writes straight to ``_LOG_FP``, so it is unaffected by ``console_only()``
+    and degrades to a plain terminal print before ``configure_log()`` runs.
+    """
+    if _LOG_FP is not None:
+        _LOG_FP.write(sep.join(str(a) for a in args) + end)
+        _LOG_FP.flush()
+    kwargs.setdefault("file", sys.stdout)
+    _ORIGINAL_PRINT(*args, sep=sep, end=end, **kwargs)
+
+
 @contextlib.contextmanager
 def console_only():
     """Context manager: ``print`` inside it reaches the terminal only.

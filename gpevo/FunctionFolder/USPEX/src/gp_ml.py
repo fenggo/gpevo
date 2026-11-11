@@ -31,7 +31,7 @@ import shutil
 
 import numpy as np
 
-from gpevo.log_utils import console_only, console_print
+from gpevo.log_utils import console_only, console_print, tee_print
 from gpevo.runtime import RESIDUAL_CUT
 
 # Active-learning defaults of CalcFitness_310.m:124-129, used when the ORG has
@@ -727,7 +727,7 @@ def _select_by_ei(numbers, table, params, data_dir=None):
     if observed is not None:
         # ``sign * observed`` is the physical value again (sign in {-1, 1}):
         # the lowest energy for optType 1, the highest density for optType 11.
-        console_print(
+        tee_print(
             f"  EI incumbent: observed {target} = {sign * observed:.4f}"
             f"  (max predicted this generation = {max_mu_ei:.4f},"
             f" gap = {observed - max_mu_ei:+.4f})")
@@ -735,8 +735,8 @@ def _select_by_ei(numbers, table, params, data_dir=None):
             # The observed incumbent lies outside the range the GP can predict
             # for these candidates, so every (mu - f_best) is negative and EI
             # collapses to its exploration term.  This is the ct22 symptom.
-            console_print("  EI note: incumbent above every candidate mean;"
-                          " the improvement term vanishes, EI ~ exploration")
+            tee_print("  EI note: incumbent above every candidate mean;"
+                      " the improvement term vanishes, EI ~ exploration")
 
     # `den` is a density, so it gates on the predicted density whatever the
     # acquisition target is; -inf means no crystal carries one at all.
@@ -910,7 +910,7 @@ def _log_learning_curve(ORG, POP, data_dir, rows_before):
         else:
             line += (f"  LOO RMSE density={rmses[0]:.4f} g/cm^3"
                      f"  energy={rmses[1]:.4f} eV")
-        console_print(line)
+        tee_print(line)
     except Exception:
         pass                            # a log line must never break a run
 
@@ -1026,7 +1026,7 @@ def _gp_active_learning(ORG, POP, fitness):
     if rows_before >= _MIN_DB_ROWS and table:
         selected, mode_label, reason, target = _select_by_ei(numbers, table, params, data_dir)
         if reason is not None:
-            console_print(f"  {reason}; GP training set unchanged")
+            tee_print(f"  {reason}; GP training set unchanged")
             return fitness
         pred_ids = [n for n in numbers if n in table and table[n][1] <= 10]
     else:
