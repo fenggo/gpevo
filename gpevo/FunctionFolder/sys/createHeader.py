@@ -40,6 +40,7 @@ CITATION_BODY = [
     "Lyakhov A.O., Oganov A.R., Stokes H., Zhu Q. (2013)",
     "New developments in evolutionary structure prediction algorithm USPEX.",
     "Comp. Phys. Comm., 184, 1172-1182",
+    "",
     "Guo F.,  Yang X.-Y., Chen F., et al. (2027)",
     "Gaussian Process Machine Learning Guided Evolutionary Crystal Structure",
     "Predictions ",
