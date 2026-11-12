@@ -116,8 +116,15 @@ def createORGDefault():
     ORG.howManySwarm = 0
     ORG.swarmStep = 0.5          # fraction of the displacement toward the best
     ORG.swarmAngle = 30.0        # max orientation slerp toward g, degrees
-    ORG.swarmInertia = 0.0       # PSO inertia weight w (0 = no momentum)
-    ORG.swarmCognitive = 0.0     # PSO cognitive pull toward pbest, c1 (0 = off)
+    # PSO coefficients from docs/swarm_pso_coefficients.md (0.6 / 0.5 is the
+    # derived starting point; 0 / 0 reduced the move to a pure social pull
+    # toward ranking[0] and made every offspring collapse onto that one point).
+    ORG.swarmInertia = 0.6       # PSO inertia weight w (0 = no momentum)
+    ORG.swarmCognitive = 0.5     # PSO cognitive pull toward pbest, c1 (0 = off)
+    # Per-offspring random exploration, in units of v_max = 0.5*|lattice row|.
+    # Independent of d_g/d_p, so a particle sitting at g with a fresh state
+    # (v=0, pbest=x) still moves instead of producing an exact clone of g.
+    ORG.swarmJitter = 0.05       # 0 disables the exploration term only
     ORG.softStepScale = 1.0
     ORG.fracGene = 0.5
     ORG.fracRand = 0.2

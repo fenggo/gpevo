@@ -23,9 +23,16 @@ individual as ind.swarm_state (plain numpy arrays / floats, so picklable and
 deepcopy-safe; see src/swarm_state.py).  pbest is refreshed once per generation
 from the evaluated fitness, and the state travels with the lineage through
 Current_POP.pkl restarts.  w = swarmInertia and c1 = swarmCognitive default to
-0, which reduces the move to the pure social term; set them > 0 to enable
-momentum / personal best.  The random U(0, step) still supplies the social
-stochastic part.
+0.6 / 0.5 (docs/swarm_pso_coefficients.md); with the legacy 0 / 0 the move was
+a pure social pull toward the single ranking[0], and a particle already at g
+produced an exact clone of it -- the observed swarm collapse (results2 gen2/gen3
+had 19/18 identical Swarm offspring).  A small per-offspring jitter
+(swarmJitter, default 0.05 v_max) is added independently of d_g / d_p, a child
+whose coordinates did not change at all is rejected, and a move that fails the
+validity gate is retried at reduced amplitude (1, 0.5, 0.25, 0.125) instead of
+being discarded.  The retry matters: a full interpolation between two different
+packings clashed ~95% of the time, which had left the zero-displacement clone
+of g as the only accepted offspring.
 
 ``g`` lives in the best structure's cell, which need not match the child's
 (heredity / latmutation mix cells).  ``_min_image`` therefore maps ``g`` into
@@ -169,8 +176,9 @@ def SwarmMutation_310(count):
 
     step = float(getattr(ORG, "swarmStep", 0.5) or 0.0)
     angle_max = float(getattr(ORG, "swarmAngle", 30.0) or 0.0) * np.pi / 180.0
-    inertia = float(getattr(ORG, "swarmInertia", 0.0) or 0.0)
-    cognitive = float(getattr(ORG, "swarmCognitive", 0.0) or 0.0)
+    inertia = float(getattr(ORG, "swarmInertia", 0.6) or 0.0)
+    cognitive = float(getattr(ORG, "swarmCognitive", 0.5) or 0.0)
+    jitter = float(getattr(ORG, "swarmJitter", 0.05) or 0.0)
 
     ranking = valid_ranking(POP)
     if not ranking or ranking[0] >= len(POP.POPULATION):
@@ -201,9 +209,10 @@ def SwarmMutation_310(count):
         lattice = np.asarray(child.LATTICE, dtype=float).reshape(3, 3)
         targets = _centers(best)
         state = ensure_swarm_state(child)
+        transforms = []
         for position, mol in enumerate(child.MOLECULES):
-            coords = np.asarray(mol.MOLCOORS, dtype=float)
-            center = coords.mean(axis=0)
+            coords0 = np.asarray(mol.MOLCOORS, dtype=float)
+            center = coords0.mean(axis=0)
 
             # Translational PSO: inertia + cognitive (pbest) + social (g).
             # pbest centres are stored fractionally, so map them into this
@@ -213,25 +222,32 @@ def SwarmMutation_310(count):
             d_p = _min_image(p_cart, center, lattice)
             r1 = np.random.rand()
             r2 = np.random.rand()
-            velocity = (inertia * state.v_cart[position]
-                        + cognitive * r1 * d_p
-                        + (step * r2) * d_g)
             # Textbook PSO v_max: at most half a lattice vector per generation.
             # Independent of swarmStep so step=0 can still carry momentum.
             v_max = 0.5 * np.linalg.norm(lattice, axis=1)
+            # Per-offspring exploration, independent of d_g / d_p.  Without it
+            # a particle already at g with a fresh state (v=0, pbest=x) has
+            # velocity 0 and produces an exact clone of g -- the collapse seen
+            # in results2, where ~80% of swarm offspring were that one clone.
+            explore = (jitter * v_max * np.random.uniform(-1.0, 1.0, 3)
+                       if jitter > 0.0 else 0.0)
+            velocity = (inertia * state.v_cart[position]
+                        + cognitive * r1 * d_p
+                        + (step * r2) * d_g
+                        + explore)
             velocity = np.clip(velocity, -v_max, v_max)
-            new_center = center + velocity
-            state.v_cart[position] = velocity
 
-            coords = coords + (new_center - center)          # rigid translation
             # Rotational PSO: compose inertia, pbest and g rotation steps.
             # Bond vectors live in the shared Cartesian basis, so no lattice
             # mapping is needed here (unlike the centre); an affine map would
             # deform bond lengths, so Kabsch extracts a best-fit pure rotation.
-            P = coords - new_center
+            # P is the centred PARENT molecule: translation-independent, so the
+            # transform can be re-applied at a damped amplitude below.
+            P = coords0 - center
             Q_g = np.asarray(best.MOLECULES[position].MOLCOORS, dtype=float)
             Q_g = Q_g - Q_g.mean(axis=0)
             Q_p = np.asarray(state.pbest_coords[position], dtype=float)
+            q_applied = None                 # None = orientation undefined
             if (P.shape == Q_g.shape == Q_p.shape
                     and np.linalg.norm(P) > 1e-12
                     and np.linalg.norm(Q_g) > 1e-12
@@ -261,20 +277,58 @@ def SwarmMutation_310(count):
                 theta_net = 2.0 * np.arccos(min(1.0, abs(float(q_net[0]))))
                 t_cap = min(1.0, angle_max / theta_net) if theta_net > 1e-12 else 0.0
                 q_applied = _quat_slerp(_IDENTITY_QUAT, q_net, t_cap)
-                coords = new_center + P @ _quat_to_matrix(q_applied)
-                state.q_v[position] = q_applied
+                if jitter > 0.0 and angle_max > 0.0 and theta_net <= 1e-12:
+                    # No net rotation (typically parent == g).  Give this
+                    # offspring its own small random orientation step too, so
+                    # siblings differ in orientation, not only in translation.
+                    axis = np.random.normal(size=3)
+                    norm = np.linalg.norm(axis)
+                    if norm > 1e-12:
+                        axis /= norm
+                        a = jitter * angle_max * np.random.rand()
+                        q_applied = np.concatenate(
+                            ([np.cos(a / 2.0)], np.sin(a / 2.0) * axis))
 
-            mol.MOLCOORS = coords
-            mol.MOLCENTER = coords.mean(axis=0)
+            transforms.append((coords0, center, velocity, P, q_applied))
 
-        if not valid_molecules(child, -0.2):
-            continue
-        recompute_zmatrix(child)
-        finalize_offspring(child, "Swarm")
-        G["OFF_STRUC"].POPULATION.append(child)
-        console_print(f"Structure {count}  generated by swarm mutation "
-                      f"(attempt {attempt})")
-        return
+        # A full-amplitude interpolation between two different packings almost
+        # always clashes: results2 rejected 95% of such moves, leaving the
+        # zero-displacement clone of g as the only accepted "offspring".  Retry
+        # the SAME transforms at reduced amplitude so a genuinely moved child
+        # survives and offspring from different parents reach different basins.
+        parent = POP.POPULATION[idx]
+        for damp in (1.0, 0.5, 0.25, 0.125):
+            for (coords0, center, velocity, P, q), mol in zip(
+                    transforms, child.MOLECULES):
+                q_d = (_quat_slerp(_IDENTITY_QUAT, q, damp)
+                       if q is not None else _IDENTITY_QUAT)
+                coords = center + damp * velocity + P @ _quat_to_matrix(q_d)
+                mol.MOLCOORS = coords
+                mol.MOLCENTER = coords.mean(axis=0)
+
+            # Never emit an exact clone.  When every guiding term vanishes
+            # (parent == g, fresh state, swarmJitter=0) the child is
+            # byte-identical to its parent; that clone filled results2 gen2/gen3
+            # (19/18 identical Swarm structures) and was re-selected forever.
+            delta = max(
+                float(np.max(np.abs(np.asarray(m.MOLCOORS, dtype=float)
+                                    - np.asarray(pm.MOLCOORS, dtype=float))))
+                for m, pm in zip(child.MOLECULES, parent.MOLECULES))
+            if delta < 1e-8:
+                continue
+            if not valid_molecules(child, -0.2):
+                continue
+            for position, (_, _, velocity, _, q) in enumerate(transforms):
+                state.v_cart[position] = damp * velocity
+                if q is not None:
+                    state.q_v[position] = _quat_slerp(
+                        _IDENTITY_QUAT, q, damp)
+            recompute_zmatrix(child)
+            finalize_offspring(child, "Swarm")
+            G["OFF_STRUC"].POPULATION.append(child)
+            console_print(f"Structure {count}  generated by swarm mutation "
+                          f"(attempt {attempt}, damp {damp})")
+            return
 
     console_print("failed to do Swarm mutation, switch to Random")
     from importlib import import_module as _im

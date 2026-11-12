@@ -6,6 +6,14 @@
 > 变陈旧，请按函数名检索（`SwarmMutation_310`、`_min_image`、`_centers`、
 > `_kabsch_rotation`、`_quat_slerp`、`swarm_state.ensure_swarm_state`）。
 >
+> **2026-11-13 塌陷修复**：`results2` gen2/gen3 的 19/18 个 Swarm 子代完全相同。
+> 根因是完整位移被 `valid_molecules` 拒绝约 95%，唯一稳定通过的是「父代 =
+> `ranking[0]` → 位移为 0 → 精确克隆最优」。现已把 `swarmInertia` /
+> `swarmCognitive` 默认值改为 **0.6 / 0.5**、新增 `swarmJitter = 0.05`、拒绝零位移
+> 克隆、并对被拒位移做阻尼重试（1 / 0.5 / 0.25 / 0.125）。**下文 §0、§5、§6 中
+> 「两个系数默认 0」「默认关闭」「无实际运行数据」等描述均为修复前状态，仅作历史
+> 背景**；回归单测见 `tests/test_swarm_collapse.py`。
+>
 > 姊妹篇：
 > - `swarm_pso_coefficients.md`：**凭什么信 / 边界在哪** —— PSO 系数的稳定三角形
 >   推导、收缩因子来历、推荐取值与量级核算（本文只讲「是什么 / 怎么落」）。

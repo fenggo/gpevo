@@ -36,12 +36,17 @@ def _ind(mol_coords, mtype_list, lattice):
 
 
 def _install(monkeypatch, parent, best, step=0.5, angle=0.0, rand_value=0.5,
-             inertia=0.0, cognitive=0.0):
-    """Wire a deterministic operator call; return the captured offspring list."""
+             inertia=0.0, cognitive=0.0, jitter=0.0):
+    """Wire a deterministic operator call; return the captured offspring list.
+
+    jitter defaults to 0 so the existing closed-form centre assertions stay
+    deterministic; the collapse regression tests opt in to a positive jitter.
+    """
     produced = []
     monkeypatch.setitem(G, "ORG_STRUC", AttrDict(
         swarmStep=step, swarmAngle=angle,
-        swarmInertia=inertia, swarmCognitive=cognitive))
+        swarmInertia=inertia, swarmCognitive=cognitive,
+        swarmJitter=jitter))
     monkeypatch.setitem(G, "POP_STRUC",
                         AttrDict(POPULATION=[parent, best], ranking=[1]))
     monkeypatch.setitem(G, "OFF_STRUC", AttrDict(POPULATION=[]))

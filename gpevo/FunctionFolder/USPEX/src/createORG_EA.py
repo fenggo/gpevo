@@ -78,10 +78,15 @@ def createORG_EA(inputFile):
     # getattr keeps restarts from older checkpoints (saved before the PSO
     # fields existed) working; ORG is an AttrDict, so a missing key would
     # otherwise raise AttributeError while evaluating the default argument.
+    # The fallbacks are the createORGDefault values, so a checkpoint that
+    # predates these fields picks up the enabled coefficients instead of the
+    # legacy 0 / 0 that collapses the swarm onto ranking[0].
     ORG.swarmInertia = _flo(p.option("swarmInertia"),
-                            getattr(ORG, "swarmInertia", 0.0))
+                            getattr(ORG, "swarmInertia", 0.6))
     ORG.swarmCognitive = _flo(p.option("swarmCognitive"),
-                              getattr(ORG, "swarmCognitive", 0.0))
+                              getattr(ORG, "swarmCognitive", 0.5))
+    ORG.swarmJitter = _flo(p.option("swarmJitter"),
+                           getattr(ORG, "swarmJitter", 0.05))
 
     # Continuous mutation amplitudes.  They are fixed when the RL bandit is
     # off and become the *starting point* of the RL inner parameters when it
