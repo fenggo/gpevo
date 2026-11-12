@@ -239,6 +239,45 @@ def _build_parser():
                            help="molecules in the run cell (numMols)")
     parser_tp.add_argument("--out", default=None,
                            help="write the primitive structure(s) here")
+    parser_fc = subparsers.add_parser(
+        "fitness-convergence",
+        help="plot per-generation min/median fitness from an Individuals table",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_fc.add_argument("-p", "--path", default="Individuals",
+                           help="path to the Individuals table")
+    parser_fc.add_argument("-o", "--out", default=None,
+                           help="output PNG (default: <dir>/fitness_convergence.png)")
+    parser_fc.add_argument("--tolerance", type=float, default=0.03,
+                           help="targetTolerance hit threshold")
+    parser_fc.add_argument("--csv", default=None,
+                           help="also write per-generation stats as CSV")
+    parser_fc.add_argument("--show", action="store_true",
+                           help="show the figure interactively")
+    parser_dedup = subparsers.add_parser(
+        "dedup",
+        help="remove duplicate structures from an ASE trajectory",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_dedup.add_argument("traj", help="input trajectory (ASE .traj / POSCAR / CIF)")
+    parser_dedup.add_argument("-o", "--output", default=None,
+                              help="output trajectory; default: <traj>_dedup.traj")
+    parser_dedup.add_argument("-r", "--report", default=None,
+                              help="write the duplicate list to this CSV file")
+    parser_dedup.add_argument("--de-tol", type=float, default=0.002,
+                              help="energy degeneracy tolerance in eV")
+    parser_dedup.add_argument("--ltol", type=float, default=0.1,
+                              help="StructureMatcher fractional lattice tolerance")
+    parser_dedup.add_argument("--stol", type=float, default=0.3,
+                              help="StructureMatcher site tolerance")
+    parser_dedup.add_argument("--angle-tol", type=float, default=3.0,
+                              help="StructureMatcher interaxial angle tolerance (deg)")
+    parser_dedup.add_argument("--keep-id", type=int, nargs="*", default=None,
+                              help="indices (0-based) to prefer as cluster representatives")
+    parser_dedup.add_argument("--dry-run", action="store_true",
+                              help="report duplicates but write no output trajectory")
+    parser_dedup.add_argument("--quiet", action="store_true",
+                              help="suppress the human-readable report")
 
     return parser
 
@@ -323,6 +362,19 @@ def main(argv=None):
         target_primitive(path=args.path, symprec=args.symprec,
                          nmol_target=args.nmol_target,
                          nmol_run=args.nmol_run, out=args.out)
+        return
+    if args.command == "fitness-convergence":
+        from gpevo.tools.fitness_convergence import fitness_convergence
+        fitness_convergence(path=args.path, out=args.out,
+                            tolerance=args.tolerance, show=args.show,
+                            csv=args.csv)
+        return
+    if args.command == "dedup":
+        from gpevo.tools.dedup import dedup
+        dedup(traj=args.traj, output=args.output, report=args.report,
+              de_tol=args.de_tol, ltol=args.ltol, stol=args.stol,
+              angle_tol=args.angle_tol, keep_id=args.keep_id,
+              dry_run=args.dry_run, quiet=args.quiet)
         return
 
     raise SystemExit(f"unknown command: {args.command}")

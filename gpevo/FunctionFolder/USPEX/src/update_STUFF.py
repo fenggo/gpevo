@@ -190,6 +190,36 @@ def update_STUFF(inputFile, goodFrac=None, ranking=None):
     if len(soft) < needed:
         ORG.softMutOnly = [0] * needed
 
+    # ---- per-generation fraction report (update_STUFF.m:127-133) --------
+    # ``fracLatMut`` is only used by the AutoFrac branch; in the static branch
+    # latmutation gets the leftover slots, so also report the effective quota
+    # instead of leaving the reader to infer it from the printed fractions.
+    from gpevo.FunctionFolder.sys.alignLine import alignLine
+    from gpevo.log_utils import write_log
+
+    write_log(alignLine("VARIATION OPERATORS") + "\n")
+    write_log(f"The fittest {float(getattr(ORG, 'bestFrac', 0.5) or 0.5) * 100:.0f} "
+              "percent of the population used to produce next generation\n")
+    for label, name in (
+        ("heredity", "fracGene"), ("random", "fracRand"),
+        ("softmutation", "fracAtomsMut"), ("permutation", "fracPerm"),
+        ("latmutation", "fracLatMut"), ("rotmutation", "fracRotMut"),
+        ("transmutation", "fracTrans"),
+    ):
+        write_log(f"    fraction of generation produced by {label:<14s}: "
+                  f"{float(getattr(ORG, name, 0.0) or 0.0):9.2f}\n")
+    for label, name in (
+        ("heredity", "howManyOffsprings"), ("random", "howManyRand"),
+        ("softmutation", "howManyAtomMutations"),
+        ("permutation", "howManyPermutations"),
+        ("latmutation", "howManyMutations"),
+        ("rotmutation", "howManyRotations"),
+        ("transmutation", "howManyTrans"),
+        ("swarm", "howManySwarm"),
+    ):
+        write_log(f"    structures produced by {label:<14s}: "
+                  f"{int(getattr(ORG, name, 0) or 0):9d}\n")
+
     G["ORG_STRUC"] = ORG
     safesave("Current_ORG.pkl", ORG)
     return ORG

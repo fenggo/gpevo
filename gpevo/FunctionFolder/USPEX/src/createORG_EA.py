@@ -56,6 +56,16 @@ def createORG_EA(inputFile):
     else:
         ORG.fracRotMut = 0.0
 
+    # createORG_EA.m:96-108: transmutation only exists for variable-composition
+    # or 2D searches.  The 310 operator list (EA_310.m:81-85) has no
+    # TransMutate, so a non-zero fracTrans here silently consumes offspring
+    # slots: update_STUFF_old counts it in sum_offsprings and can starve
+    # latmutation, which only receives the leftover slots.
+    if int(getattr(ORG, "varcomp", 0) or 0) == 1 or int(getattr(ORG, "dimension", 3)) == 2:
+        ORG.fracTrans = _flo(p.scalar("fracTrans"), 0.1)
+    else:
+        ORG.fracTrans = 0.0
+
     ORG.howManyMut = _flo(p.scalar("mutationDegree"), ORG.howManyMut)
     ORG.mutationRate = _flo(p.scalar("mutationRate"), ORG.mutationRate)
 
@@ -131,7 +141,7 @@ def createORG_EA(inputFile):
     how_gene = round(N * ORG.fracGene)
     how_rand = round(N * ORG.fracRand)
     how_rot = round(N * ORG.fracRotMut)
-    how_trans = 0
+    how_trans = round(N * ORG.fracTrans)
     total = how_atom + how_perm + how_gene + how_rand + how_rot + how_trans
     if total > N:
         def scale(k):
