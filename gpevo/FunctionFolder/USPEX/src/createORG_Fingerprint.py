@@ -45,6 +45,18 @@ def createORG_Fingerprint(inputFile):
     raw = p.scalar("antiSeedsActivation")
     if raw is not None:
         ORG.antiSeedsActivation = float(raw)
+    # optType 14: one or more fixed target structures (POSCAR/CIF/.traj).
+    # ``option`` accepts both `path : targetStructure` and
+    # `targetStructure : path`; comma-separated paths must contain no spaces.
+    raw = p.option("targetStructure")
+    ORG.targetStructure = ([t.strip() for t in str(raw).split(",") if t.strip()]
+                           if raw else [])
+    raw = p.option("targetBondCut")
+    if raw is not None:
+        ORG.targetBondCut = float(raw)
+    raw = p.option("targetTolerance")
+    if raw is not None:
+        ORG.targetTolerance = float(raw)
     # Weights are over atom types, not molecule types.  For molecular runs,
     # ``GetPOP_MOL`` reconstructs the per-atom-type counts that correspond to
     # the atom-type dimension of the full-atom fingerprint matrix.

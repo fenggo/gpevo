@@ -41,6 +41,32 @@ def check_optType_13(ORG):
     )
 
 
+def check_optType_14(ORG):
+    """Fail fast when optType 14 has no readable target structure.
+
+    The target fingerprints are read at fitness time, i.e. after a whole
+    generation of relaxations.  Validate the paths here so a typo in
+    ``targetStructure`` does not waste that generation.
+    """
+    if int(getattr(ORG, "optType", 1) or 1) != 14:
+        return
+    raw = getattr(ORG, "targetStructure", None)
+    paths = raw.split(",") if isinstance(raw, str) else list(raw or [])
+    paths = [str(p).strip() for p in paths if str(p).strip()]
+    if not paths:
+        raise RuntimeError(
+            "optType 14 requires `targetStructure : <POSCAR/CIF/.traj[,..]>` "
+            "in INPUT.txt"
+        )
+    home = getattr(ORG, "homePath", None) or os.getcwd()
+    for path in paths:
+        full = path if os.path.isabs(path) else os.path.join(home, path)
+        if not (os.path.isfile(full) and os.access(full, os.R_OK)):
+            raise RuntimeError(
+                f"optType 14: target structure is missing or unreadable: {full}"
+            )
+
+
 def createORGStruc(inputFile="INPUT.txt"):
     ORG = createORGDefault()
     G["ORG_STRUC"] = ORG
@@ -77,6 +103,7 @@ def createORGStruc(inputFile="INPUT.txt"):
     createORG_Fingerprint(inputFile)
 
     check_optType_13(ORG)
+    check_optType_14(ORG)
 
     # Latticevalues
     p = InputParser(inputFile)

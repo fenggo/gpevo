@@ -224,6 +224,21 @@ def _build_parser():
     parser_pack.add_argument("--traj", default=None, help="trajectory file")
     parser_pack.add_argument("--range", dest="range_", metavar="RANGE",
                              default=None, help="index range, e.g. 1-10")
+    parser_tp = subparsers.add_parser(
+        "target-primitive",
+        help="check whether an optType-14 target reduces to the run's cell",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_tp.add_argument("-p", "--path", required=True,
+                           help="target POSCAR/CIF/.traj")
+    parser_tp.add_argument("--symprec", type=float, default=0.05,
+                           help="spglib symmetry tolerance")
+    parser_tp.add_argument("--nmol-target", type=int, default=None,
+                           help="molecules in the target cell")
+    parser_tp.add_argument("--nmol-run", type=int, default=None,
+                           help="molecules in the run cell (numMols)")
+    parser_tp.add_argument("--out", default=None,
+                           help="write the primitive structure(s) here")
 
     return parser
 
@@ -302,6 +317,12 @@ def main(argv=None):
     if args.command == "pack":
         from gpevo.uspexkit.core import pack
         pack(output=args.output, traj=args.traj, range_=args.range_)
+        return
+    if args.command == "target-primitive":
+        from gpevo.tools.target_primitive import target_primitive
+        target_primitive(path=args.path, symprec=args.symprec,
+                         nmol_target=args.nmol_target,
+                         nmol_run=args.nmol_run, out=args.out)
         return
 
     raise SystemExit(f"unknown command: {args.command}")

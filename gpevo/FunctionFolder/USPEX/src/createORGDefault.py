@@ -85,6 +85,9 @@ def createORGDefault():
     ORG.antiSeedsMax = 0
     ORG.antiSeedsSigma = 0.001
     ORG.antiSeedsActivation = 5000
+    ORG.targetStructure = []
+    ORG.targetBondCut = 0.0
+    ORG.targetTolerance = 0.03
     ORG.reconstruct = 1
     ORG.thicknessS = 2.0
     ORG.thicknessB = 3.0

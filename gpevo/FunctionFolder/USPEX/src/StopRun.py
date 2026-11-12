@@ -14,7 +14,7 @@ def StopRun(fitness, generation, num_generations, stop_crit=0, stop_fitness=None
 
     if stop_fitness is not None:
         if values.size and float(np.min(values)) <= float(stop_fitness):
-            return 1, f"Known ground state achieved: {stop_fitness}eV"
+            return 1, f"Target fitness achieved: {stop_fitness}"
     elif generation >= stop_crit:
         from gpevo.FunctionFolder.USPEX.src.SameBest import SameBest
 

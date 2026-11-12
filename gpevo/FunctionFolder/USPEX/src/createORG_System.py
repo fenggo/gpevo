@@ -89,8 +89,9 @@ def createORG_System(inputFile):
             s = "12"
         elif s.lower() == "distance":
             s = "13"
-        elif s.lower() == "powerfactor":
-            s = "14"
+        # optType 14 is the fingerprint distance to a target structure
+        # (CalcFitness_310.py).  The MATLAB alias "powerfactor" is not
+        # implemented here, so do not map it onto 14.
         try:
             ORG.optType = abs(int(s))
         except Exception:
