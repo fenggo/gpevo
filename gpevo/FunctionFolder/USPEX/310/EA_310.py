@@ -106,7 +106,12 @@ def EA_310():
         OFF.generation = POP.generation
         OFF.bodyCount = POP.bodyCount
         OFF.resFolder = getattr(POP, "resFolder", ORG.resFolder)
-        OFF.ranking = list(POP.ranking)
+        # OFF.POPULATION is brand new: the parent generation's ranking refers
+        # to indices of POP.POPULATION, not to any of these offspring.  Keep it
+        # empty so valid_ranking() falls back to natural order until
+        # FitnessRankingCorrection publishes the new ranking (WriteGenerationStart
+        # also clears it before the next local-optimisation loop).
+        OFF.ranking = []
         OFF.DoneOrder = []
         # MATLAB does OFF_STRUC = POP_STRUC (then clears POPULATION), so the
         # soft-mode parent cache and SOFTMUTATED flag survive the generation.
