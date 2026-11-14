@@ -205,9 +205,12 @@ theta mean ~ alpha/(alpha+beta) = [0.9999 ...]
 
 ### 3.1 适应度只用 GP 均值 μ，没有不确定性惩罚 → 代理被「钻空子」
 
-`use_gp_density.py` 只要 `density_gp` 有限就覆盖几何密度；`CalcFitness_310.py:43,49`
-于是 `optType 11/12` 的适应度完全由 GP **均值**决定。EA 的选择压力（`build_tournament`
-权重 `(N-p)^2`，`variation_common.py:113-121`）+ 精英保留会持续把搜索推向 GP 高估的区域。
+`1 : gp` 时 `use_gp_density.py` / `use_gp_energy.py` 在预测值有限时把几何密度 /
+力场焓换成 GP **均值**（`density_gp` / `energy_gp`）；`CalcFitness_310.py` 的
+optType 11/12 适应度于是完全由均值决定、没有不确定性惩罚（11 是 `−density_gp`，
+12 是 `0.1*energy_gp/factor − density_gp`，GP 关闭时才回退到几何密度 / 力场焓）。
+EA 的选择压力（`build_tournament` 权重 `(N-p)^2`，`variation_common.py:113-121`）
++ 精英保留会持续把搜索推向 GP 高估的区域。
 每代只有少数结构拿到 DFT 标签，ct22 那种「整代无标注」时模型还会停在旧版本上。
 
 **建议**（按侵入性排序）：
@@ -243,8 +246,9 @@ ct22/results2 的症状：`k=1` + `den=1.79` 贴着 GP 最优 1.8032 → 唯一 
   **完全不看指纹**，只比「平均有序度 + 每离子焓」是否落在 `0.075 / 0.015` 内。
   两种「相同结构」判据并存，且后者会把焓相近、堆积不同的结构合并 → 算子奖励归因可能失真。
 - `fingerprint_utils.py:541,547` 算出的 `struc_entr` / `S_order` 只被 `Correlation`
-  和 `SameStructure_order` 消费，**没有进入适应度**（`CalcFitness_310.py:44` 注释写
-  「density combined with entropy」，实际是 `enthalpy/factor − 0.5*density`）。
+  和 `SameStructure_order` 消费，**没有进入适应度**：`CalcFitness_310.py` 的
+  optType 12 分支现在是 `0.1*enthalpy/factor − density`（`1 : gp` 时两项取 GP 预测值
+  `energy_gp` / `density_gp`，GP 关闭时取力场焓 / 几何密度），公式里仍没有熵项。
 - 陡峭的锦标赛 `(N-p)^2` + 精英保留 + 去重，容易早熟；当前没有逐代多样性指标。
 
 **建议**：每代记录精英池内平均成对指纹余弦距离作为多样性曲线；必要时引入 crowding / fitness sharing，

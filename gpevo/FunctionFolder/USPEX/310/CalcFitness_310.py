@@ -265,12 +265,17 @@ def CalcFitness_310():
             density = calc_density(s.numIons, ORG.atomType, volume)
             density = use_gp_density(s, density)
             fitness[i] = -1.0 * float(density if density is not None else 0.0)
-        elif ORG.optType == 12:                              # density combined with entropy
+        elif ORG.optType == 12:                              # 0.1*enthalpy/factor - density
             volume = det(np.asarray(s.LATTICE).reshape(3, 3))
             density = calc_density(s.numIons, ORG.atomType, volume)
-            density = use_gp_density(s, density)
+            # With `1 : gp` both terms are the GP predictions (energy_gp and
+            # density_gp); with the GP off they stay the force-field enthalpy
+            # and the geometric density.
+            if gp_enabled(ORG):
+                enthalpy = use_gp_energy(s, enthalpy)
+                density = use_gp_density(s, density)
             factor = (sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))) * sum(ORG.numMols)
-            fitness[i] = enthalpy / max(1e-12, factor) - 0.5 * float(density if density is not None else 0.0)
+            fitness[i] = 0.1 * enthalpy / max(1e-12, factor) - float(density if density is not None else 0.0)
         elif ORG.optType == 13:                              # distance to dataset
             # CalcFitness_310.m:46-53 uses POPULATION(i).distance, which is the
             # GP residual (Hilbert-space distance to the training set).  It is

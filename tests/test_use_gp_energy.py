@@ -88,3 +88,43 @@ def test_opt_type_11_still_uses_gp_density(monkeypatch):
     s.LATTICE = np.eye(3).tolist()
     out = _run(monkeypatch, _org(gp=1, opt_type=11), [s])
     assert out[0] == pytest.approx(-1.9)
+
+
+def _geometric_density(*args, **kwargs):
+    return 2.0
+
+
+def _individual12(enthalpy=-100.0, energy_gp=None, density_gp=None):
+    s = _individual(enthalpy=enthalpy, energy_gp=energy_gp)
+    s.LATTICE = np.eye(3).tolist()
+    if density_gp is not None:
+        s.density_gp = density_gp
+    return s
+
+
+def test_opt_type_12_formula_with_both_gp_predictions(monkeypatch):
+    """`1 : gp` -> 0.1*energy_gp/factor - density_gp (both GP predictions)."""
+    monkeypatch.setattr(_cf, "calc_density", _geometric_density)
+    s = _individual12(enthalpy=-100.0, energy_gp=-280.0,
+                      density_gp=1.9)
+    out = _run(monkeypatch, _org(gp=1, opt_type=12), [s])
+    assert out[0] == pytest.approx(0.1 * (-280.0) / 1.0 - 1.9)
+
+
+def test_opt_type_12_keeps_raw_values_when_gp_is_off(monkeypatch):
+    """With the GP off, enthalpy is force-field and density is geometric."""
+    monkeypatch.setattr(_cf, "calc_density", _geometric_density)
+    s = _individual12(enthalpy=-100.0, energy_gp=-280.0,
+                      density_gp=1.9)
+    out = _run(monkeypatch, _org(gp=0, opt_type=12), [s])
+    assert out[0] == pytest.approx(0.1 * (-100.0) / 1.0 - 2.0)
+
+
+def test_opt_type_12_falls_back_when_gp_predictions_are_missing(monkeypatch):
+    monkeypatch.setattr(_cf, "calc_density", _geometric_density)
+    a = _individual12(enthalpy=-100.0, energy_gp=float("nan"),
+                      density_gp=float("nan"))
+    b = _individual12(enthalpy=-120.0)
+    out = _run(monkeypatch, _org(gp=1, opt_type=12), [a, b])
+    assert out[0] == pytest.approx(0.1 * (-100.0) - 2.0)
+    assert out[1] == pytest.approx(0.1 * (-120.0) - 2.0)

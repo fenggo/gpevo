@@ -1187,9 +1187,10 @@ def _gp_active_learning(ORG, POP, fitness):
                 continue
             fitness[index] = opt_sign * (-1.0 * float(value))
         else:
-            # optType 12/13 mix density with other quantities (entropy,
-            # distance): no single ML value can replace the fitness, so keep
-            # what CalcFitness computed.
+            # optType 12 combines the GP enthalpy and density predictions
+            # (0.1*energy_gp/factor - density_gp under `1 : gp`), optType 13 is
+            # the GP residual: no single ML value can replace the fitness, so
+            # keep what CalcFitness computed.
             continue
         updated += 1
     console_print(f"  Updated fitness for {updated}/{len(valid)} valid crystals "
