@@ -173,11 +173,14 @@ def _training_file_13(tmp_path):
 
 
 def _run13(tmp_path, monkeypatch, feature, residual,
-           etot_weight=None, ecoul_weight=None, density_weight=None):
+           etot_weight=None, evdw_weight=None, ecoul_weight=None,
+           density_weight=None):
     _training_file_13(tmp_path)
     extra = {}
     if etot_weight is not None:
         extra["etotWeight"] = etot_weight
+    if evdw_weight is not None:
+        extra["evdwWeight"] = evdw_weight
     if ecoul_weight is not None:
         extra["ecoulWeight"] = ecoul_weight
     if density_weight is not None:
@@ -195,9 +198,11 @@ def _run13(tmp_path, monkeypatch, feature, residual,
 _F_BOTH = [1.5, 2, 3, 4, 5, 6, 7, 8, 9, 10.5]
 _F_ETOT = [1.5, 2, 3, 4, 5, 6, 7, 8, 9, 10.0]
 _F_DENS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10.5]
-# only ecoul (column 8) differs / all three weighted columns differ
+# only evdw (column 4) / only ecoul (column 8) differs
+_F_EVDW = [1, 2, 3, 4, 5.5, 6, 7, 8, 9, 10.0]
 _F_ECOUL = [1, 2, 3, 4, 5, 6, 7, 8, 9.5, 10.0]
-_F_ALL = [1.5, 2, 3, 4, 5, 6, 7, 8, 9.5, 10.5]
+# all four weighted columns differ (etot, evdw, ecoul, density)
+_F_ALL = [1.5, 2, 3, 4, 5.5, 6, 7, 8, 9.5, 10.5]
 
 
 def test_opt_type_13_default_weights(tmp_path, monkeypatch):
@@ -217,15 +222,28 @@ def test_opt_type_13_density_weight_default_is_0_1(tmp_path, monkeypatch):
 
 
 def test_opt_type_13_all_weights_one_reproduce_raw_residual(tmp_path, monkeypatch):
-    out = _run13(tmp_path, monkeypatch, _F_ALL, 0.75,
-                 etot_weight=1.0, ecoul_weight=1.0, density_weight=1.0)
-    assert out == pytest.approx(0.75)
+    out = _run13(tmp_path, monkeypatch, _F_ALL, 1.0,
+                 etot_weight=1.0, evdw_weight=1.0,
+                 ecoul_weight=1.0, density_weight=1.0)
+    assert out == pytest.approx(1.0)
 
 
 def test_opt_type_13_default_weights_all_columns(tmp_path, monkeypatch):
-    # etot 0.01, ecoul 0.2, density 0.1 -> 0.0025 + 0.05 + 0.025
-    out = _run13(tmp_path, monkeypatch, _F_ALL, 0.75)
-    assert out == pytest.approx(0.01 * 0.25 + 0.2 * 0.25 + 0.1 * 0.25)
+    # etot 0.01, evdw 0.2, ecoul 0.2, density 0.1
+    out = _run13(tmp_path, monkeypatch, _F_ALL, 1.0)
+    assert out == pytest.approx(0.01 * 0.25 + 0.2 * 0.25
+                                + 0.2 * 0.25 + 0.1 * 0.25)
+
+
+def test_opt_type_13_evdw_weight_default_is_0_2(tmp_path, monkeypatch):
+    # Only evdw differs; the default 0.2 keeps 20% of that column.
+    out = _run13(tmp_path, monkeypatch, _F_EVDW, 0.25)
+    assert out == pytest.approx(0.2 * 0.25)
+
+
+def test_opt_type_13_custom_evdw_weight(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_EVDW, 0.25, evdw_weight=0.6)
+    assert out == pytest.approx(0.6 * 0.25)
 
 
 def test_opt_type_13_ecoul_weight_default_is_0_2(tmp_path, monkeypatch):
@@ -255,7 +273,8 @@ def test_opt_type_13_without_feature_keeps_raw_residual(tmp_path, monkeypatch):
 def test_other_opt_types_ignore_the_column_weights(tmp_path, monkeypatch):
     _training_file_13(tmp_path)
     org = _org(opt_type=1, gp=0, homePath=str(tmp_path), gpData=".",
-               etotWeight=0.0, ecoulWeight=1.0, densityWeight=0.0)
+               etotWeight=0.0, evdwWeight=1.0, ecoulWeight=1.0,
+               densityWeight=0.0)
     s = _individual(residual=3.0, enthalpy=-10.0)
     s.gp_feature = _F_BOTH
     monkeypatch.setitem(G, "ORG_STRUC", org)

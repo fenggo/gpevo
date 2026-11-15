@@ -99,9 +99,10 @@ def createORG_System(inputFile):
 
     # optType 13 only: per-column weights on the GP residual when it is turned
     # into fitness (CalcFitness_310).  In the 10-D ReaxFF feature etot is
-    # column 0, ecoul column 8 and density the last column; 1.0 reproduces the
-    # raw residual.  Defaults: etot 0.01, ecoul 0.2, density 0.1.  The
-    # residual stored by gp() itself (gp.csv / OOD gates / EI) is never touched.
+    # column 0, evdw column 4, ecoul column 8 and density the last column;
+    # 1.0 reproduces the raw residual.  Defaults: etot 0.01, evdw 0.2,
+    # ecoul 0.2, density 0.1.  The residual stored by gp() itself
+    # (gp.csv / OOD gates / EI) is never touched.
     raw = p.option("densityWeight")
     try:
         ORG.densityWeight = float(raw) if raw is not None else 0.1
@@ -117,6 +118,11 @@ def createORG_System(inputFile):
         ORG.ecoulWeight = float(raw) if raw is not None else 0.2
     except (TypeError, ValueError):
         ORG.ecoulWeight = 0.2
+    raw = p.option("evdwWeight")
+    try:
+        ORG.evdwWeight = float(raw) if raw is not None else 0.2
+    except (TypeError, ValueError):
+        ORG.evdwWeight = 0.2
 
     raw = p.scalar("calculationType")
     if raw is not None:

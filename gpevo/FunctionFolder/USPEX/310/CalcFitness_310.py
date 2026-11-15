@@ -29,22 +29,25 @@ def _usable(value):
 _TRAIN_FEATURE_CACHE = {}
 
 
-def _weighted_feature_distance(ORG, s, residual, etot_weight, ecoul_weight,
-                               density_weight):
+def _weighted_feature_distance(ORG, s, residual, etot_weight, evdw_weight,
+                               ecoul_weight, density_weight):
     """Recompute the optType-13 distance with weighted energy columns.
 
     ``gp()`` builds the residual as ``min_j sum_k (d[j,k] - f[k])**2`` over the
     10 ReaxFF feature columns.  optType 13 uses that scalar as fitness; this
     helper recomputes the *same* nearest-neighbour distance but scales column 0
-    (etot), column 8 (ecoul) and the last column (density) by their weights::
+    (etot), column 4 (evdw), column 8 (ecoul) and the last column (density) by
+    their weights::
 
         fitness = etot_weight    * (d[imin,0] - f[0])**2
-                + sum_{k=1..7}     (d[imin,k] - f[k])**2
+                + sum_{k=1..3}     (d[imin,k] - f[k])**2
+                + evdw_weight    * (d[imin,4] - f[4])**2
+                + sum_{k=5..7}     (d[imin,k] - f[k])**2
                 + ecoul_weight   * (d[imin,8] - f[8])**2
                 + density_weight * (d[imin,9] - f[9])**2
 
     with ``imin = argmin_j sum_k (d[j,k]-f[k])**2`` -- the *unweighted* row the
-    raw residual uses.  Setting all three weights to 1.0 reproduces the raw
+    raw residual uses.  Setting all four weights to 1.0 reproduces the raw
     residual exactly.
 
     The raw residual in ``core.raw_residual`` / gp.csv is never modified: this
@@ -80,6 +83,8 @@ def _weighted_feature_distance(ORG, s, residual, etot_weight, ecoul_weight,
     row = diff[imin]
     weights = np.ones(f.size, dtype=float)
     weights[0] = etot_weight
+    if f.size >= 5:
+        weights[4] = evdw_weight         # evdw, column 4 of the 10-D feature
     if f.size >= 9:
         weights[8] = ecoul_weight       # ecoul, column 8 of the 10-D feature
     weights[-1] = density_weight
@@ -305,6 +310,8 @@ def CalcFitness_310():
     fallback13 = 0
     raw_e13 = getattr(ORG, "etotWeight", 0.01)
     w_e13 = float(raw_e13) if raw_e13 is not None else 0.01
+    raw_v13 = getattr(ORG, "evdwWeight", 0.2)
+    w_v13 = float(raw_v13) if raw_v13 is not None else 0.2
     raw_c13 = getattr(ORG, "ecoulWeight", 0.2)
     w_c13 = float(raw_c13) if raw_c13 is not None else 0.2
     raw_w13 = getattr(ORG, "densityWeight", 0.1)
@@ -357,13 +364,13 @@ def CalcFitness_310():
                 dist = getattr(s, "distance", None)
             if _usable(dist):
                 # Recompute the very same nearest-neighbour 10-D distance, but
-                # with etot / ecoul / density scaled by their weights (defaults
-                # 0.01 / 0.2 / 0.1).  The residual itself (gp.csv, OOD gates,
-                # EI) is left alone.  Without the 10-D feature -- CLI /
-                # restarted runs only read scalars back from gp.csv -- keep the
-                # raw residual.
+                # with etot / evdw / ecoul / density scaled by their weights
+                # (defaults 0.01 / 0.2 / 0.2 / 0.1).  The residual itself
+                # (gp.csv, OOD gates, EI) is left alone.  Without the 10-D
+                # feature -- CLI / restarted runs only read scalars back from
+                # gp.csv -- keep the raw residual.
                 fitness[i], ok = _weighted_feature_distance(
-                    ORG, s, dist, w_e13, w_c13, w13)
+                    ORG, s, dist, w_e13, w_v13, w_c13, w13)
                 if ok:
                     weighted13 += 1
                 else:
@@ -421,8 +428,8 @@ def CalcFitness_310():
         console_print(
             f"  optType 13: weighted fitness for {weighted13}/"
             f"{len(POP.POPULATION)} structure(s) "
-            f"(etotWeight={w_e13:g}, ecoulWeight={w_c13:g}, "
-            f"densityWeight={w13:g}); "
+            f"(etotWeight={w_e13:g}, evdwWeight={w_v13:g}, "
+            f"ecoulWeight={w_c13:g}, densityWeight={w13:g}); "
             f"{fallback13} kept the raw residual "
             "(no 10-D feature / training file)")
 
