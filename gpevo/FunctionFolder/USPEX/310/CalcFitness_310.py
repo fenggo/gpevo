@@ -23,6 +23,69 @@ def _usable(value):
     return math.isfinite(out)
 
 
+# optType 13: the training rows of ``gp()`` (``data[:,1:]`` of
+# <homePath>/<gpData>/feature_mlp.csv), cached by mtime because active
+# learning can append a row between generations.
+_TRAIN_FEATURE_CACHE = {}
+
+
+def _weighted_feature_distance(ORG, s, residual, etot_weight, ecoul_weight,
+                               density_weight):
+    """Recompute the optType-13 distance with weighted energy columns.
+
+    ``gp()`` builds the residual as ``min_j sum_k (d[j,k] - f[k])**2`` over the
+    10 ReaxFF feature columns.  optType 13 uses that scalar as fitness; this
+    helper recomputes the *same* nearest-neighbour distance but scales column 0
+    (etot), column 8 (ecoul) and the last column (density) by their weights::
+
+        fitness = etot_weight    * (d[imin,0] - f[0])**2
+                + sum_{k=1..7}     (d[imin,k] - f[k])**2
+                + ecoul_weight   * (d[imin,8] - f[8])**2
+                + density_weight * (d[imin,9] - f[9])**2
+
+    with ``imin = argmin_j sum_k (d[j,k]-f[k])**2`` -- the *unweighted* row the
+    raw residual uses.  Setting all three weights to 1.0 reproduces the raw
+    residual exactly.
+
+    The raw residual in ``core.raw_residual`` / gp.csv is never modified: this
+    is a fitness-only adjustment.  Returns ``(fitness, ok)``; ``ok`` is False
+    when the 10-D feature (CLI / restarted runs only read scalars back from
+    gp.csv) or the training file is unavailable, in which case the caller
+    keeps the original residual.
+    """
+    f = getattr(s, "gp_feature", None)
+    if f is None:
+        return float(residual), False
+    f = np.asarray(f, dtype=float).ravel()
+    if f.size < 2:
+        return float(residual), False
+
+    home = getattr(ORG, "homePath", None) or os.getcwd()
+    data_dir = str(getattr(ORG, "gpData", "data") or "data")
+    path = os.path.join(home, data_dir, "feature_mlp.csv")
+    try:
+        key = (os.path.abspath(path), os.stat(path).st_mtime_ns)
+        d = _TRAIN_FEATURE_CACHE.get(key)
+        if d is None:
+            d = np.atleast_2d(np.loadtxt(path, delimiter=",", skiprows=1))
+            d = d[:, 1:]                 # drop the index column, as gp() does
+            _TRAIN_FEATURE_CACHE[key] = d
+    except Exception:
+        return float(residual), False
+    if d.ndim != 2 or d.shape[0] == 0 or d.shape[1] != f.size:
+        return float(residual), False
+
+    diff = d - f
+    imin = int(np.argmin(np.sum(diff * diff, axis=1)))
+    row = diff[imin]
+    weights = np.ones(f.size, dtype=float)
+    weights[0] = etot_weight
+    if f.size >= 9:
+        weights[8] = ecoul_weight       # ecoul, column 8 of the 10-D feature
+    weights[-1] = density_weight
+    return float(np.sum(weights * row * row)), True
+
+
 # optType 14: fingerprints of the fixed target structure(s).  Keyed by
 # (path, mtime_ns, RmaxFing, sigmaFing, deltaFing, dimension, atomType,
 #  bond_cut, molecule).  Recomputed only when the file or the fingerprint
@@ -238,6 +301,14 @@ def CalcFitness_310():
     fitness = np.zeros(len(POP.POPULATION), dtype=float)
     missing_distance = 0
     missing_fp = 0
+    weighted13 = 0
+    fallback13 = 0
+    raw_e13 = getattr(ORG, "etotWeight", 0.01)
+    w_e13 = float(raw_e13) if raw_e13 is not None else 0.01
+    raw_c13 = getattr(ORG, "ecoulWeight", 0.2)
+    w_c13 = float(raw_c13) if raw_c13 is not None else 0.2
+    raw_w13 = getattr(ORG, "densityWeight", 0.1)
+    w13 = float(raw_w13) if raw_w13 is not None else 0.1
     # optType 14 needs the target fingerprint(s) once per generation, not
     # once per individual.  Raises early with a clear message on bad config.
     target_fps = (_target_fingerprints(ORG)
@@ -285,7 +356,18 @@ def CalcFitness_310():
             if not _usable(dist):
                 dist = getattr(s, "distance", None)
             if _usable(dist):
-                fitness[i] = float(dist)
+                # Recompute the very same nearest-neighbour 10-D distance, but
+                # with etot / ecoul / density scaled by their weights (defaults
+                # 0.01 / 0.2 / 0.1).  The residual itself (gp.csv, OOD gates,
+                # EI) is left alone.  Without the 10-D feature -- CLI /
+                # restarted runs only read scalars back from gp.csv -- keep the
+                # raw residual.
+                fitness[i], ok = _weighted_feature_distance(
+                    ORG, s, dist, w_e13, w_c13, w13)
+                if ok:
+                    weighted13 += 1
+                else:
+                    fallback13 += 1
             else:
                 fitness[i] = float("nan")
                 missing_distance += 1
@@ -334,6 +416,15 @@ def CalcFitness_310():
         else:
             console_print("         the GP step must complete for these structures "
                           "before their distance exists.")
+
+    if ORG.optType == 13 and (weighted13 or fallback13):
+        console_print(
+            f"  optType 13: weighted fitness for {weighted13}/"
+            f"{len(POP.POPULATION)} structure(s) "
+            f"(etotWeight={w_e13:g}, ecoulWeight={w_c13:g}, "
+            f"densityWeight={w13:g}); "
+            f"{fallback13} kept the raw residual "
+            "(no 10-D feature / training file)")
 
     if ORG.opt_sign is None:
         ORG.opt_sign = 1

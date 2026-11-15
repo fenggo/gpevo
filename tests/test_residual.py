@@ -154,3 +154,110 @@ def test_gp_columns_include_residual_and_stay_aligned():
 
 def test_gp_columns_blank_block_has_the_same_width():
     assert _gp_columns(struct()) == " " * len(GP_OUTPUT_HEADER)
+
+
+# --------------------------------------------------------------------------
+# optType 13: column-weighted fitness (the raw residual itself is untouched)
+# --------------------------------------------------------------------------
+
+_ROWS_13 = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10.0],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 12.0]]
+
+
+def _training_file_13(tmp_path):
+    path = tmp_path / "feature_mlp.csv"
+    lines = [", etot, ebond, eang, etor, evdw, ehb_cho, ehb_chn, ehb_chc, ecoul, density"]
+    for j, row in enumerate(_ROWS_13):
+        lines.append(",".join([str(j)] + [f"{v:g}" for v in row]))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _run13(tmp_path, monkeypatch, feature, residual,
+           etot_weight=None, ecoul_weight=None, density_weight=None):
+    _training_file_13(tmp_path)
+    extra = {}
+    if etot_weight is not None:
+        extra["etotWeight"] = etot_weight
+    if ecoul_weight is not None:
+        extra["ecoulWeight"] = ecoul_weight
+    if density_weight is not None:
+        extra["densityWeight"] = density_weight
+    org = _org(homePath=str(tmp_path), gpData=".", **extra)
+    s = _individual(residual=residual)
+    if feature is not None:
+        s.gp_feature = feature
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", struct(generation=1, POPULATION=[s]))
+    return CalcFitness_310()[0]
+
+
+# w.r.t. the nearest training row: etot +0.5, density +0.5 / only one of them
+_F_BOTH = [1.5, 2, 3, 4, 5, 6, 7, 8, 9, 10.5]
+_F_ETOT = [1.5, 2, 3, 4, 5, 6, 7, 8, 9, 10.0]
+_F_DENS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10.5]
+# only ecoul (column 8) differs / all three weighted columns differ
+_F_ECOUL = [1, 2, 3, 4, 5, 6, 7, 8, 9.5, 10.0]
+_F_ALL = [1.5, 2, 3, 4, 5, 6, 7, 8, 9.5, 10.5]
+
+
+def test_opt_type_13_default_weights(tmp_path, monkeypatch):
+    # 0.01 * 0.25 (etot) + 0.1 * 0.25 (density) = 0.0275
+    out = _run13(tmp_path, monkeypatch, _F_BOTH, 0.5)
+    assert out == pytest.approx(0.01 * 0.25 + 0.1 * 0.25)
+
+
+def test_opt_type_13_etot_weight_default_is_0_01(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_ETOT, 0.25)
+    assert out == pytest.approx(0.01 * 0.25)
+
+
+def test_opt_type_13_density_weight_default_is_0_1(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_DENS, 0.25)
+    assert out == pytest.approx(0.1 * 0.25)
+
+
+def test_opt_type_13_all_weights_one_reproduce_raw_residual(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_ALL, 0.75,
+                 etot_weight=1.0, ecoul_weight=1.0, density_weight=1.0)
+    assert out == pytest.approx(0.75)
+
+
+def test_opt_type_13_default_weights_all_columns(tmp_path, monkeypatch):
+    # etot 0.01, ecoul 0.2, density 0.1 -> 0.0025 + 0.05 + 0.025
+    out = _run13(tmp_path, monkeypatch, _F_ALL, 0.75)
+    assert out == pytest.approx(0.01 * 0.25 + 0.2 * 0.25 + 0.1 * 0.25)
+
+
+def test_opt_type_13_ecoul_weight_default_is_0_2(tmp_path, monkeypatch):
+    # Only ecoul differs; the default 0.2 keeps 20% of that column.
+    out = _run13(tmp_path, monkeypatch, _F_ECOUL, 0.25)
+    assert out == pytest.approx(0.2 * 0.25)
+
+
+def test_opt_type_13_custom_ecoul_weight(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_ECOUL, 0.25, ecoul_weight=0.7)
+    assert out == pytest.approx(0.7 * 0.25)
+
+
+def test_opt_type_13_custom_etot_weight(tmp_path, monkeypatch):
+    out = _run13(tmp_path, monkeypatch, _F_BOTH, 0.5,
+                 etot_weight=0.5, density_weight=1.0)
+    assert out == pytest.approx(0.5 * 0.25 + 1.0 * 0.25)
+
+
+def test_opt_type_13_without_feature_keeps_raw_residual(tmp_path, monkeypatch):
+    # CLI / restarted runs only read scalars back from gp.csv, so no 10-D
+    # feature is available: fitness must stay the unmodified residual.
+    out = _run13(tmp_path, monkeypatch, None, 1.75)
+    assert out == pytest.approx(1.75)
+
+
+def test_other_opt_types_ignore_the_column_weights(tmp_path, monkeypatch):
+    _training_file_13(tmp_path)
+    org = _org(opt_type=1, gp=0, homePath=str(tmp_path), gpData=".",
+               etotWeight=0.0, ecoulWeight=1.0, densityWeight=0.0)
+    s = _individual(residual=3.0, enthalpy=-10.0)
+    s.gp_feature = _F_BOTH
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", struct(generation=1, POPULATION=[s]))
+    assert CalcFitness_310()[0] == pytest.approx(-10.0)
