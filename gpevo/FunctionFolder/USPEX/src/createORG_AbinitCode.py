@@ -279,6 +279,22 @@ def createORG_AbinitCode(inputFile):
             ORG.gpLr = float(raw)
         except ValueError:
             pass
+    # optType 12 + `1 : gp`: weight of the relative energy term and its
+    # baseline.  `eref12` defaults to the median etot of <data>/feature.csv.
+    raw = p.option("w12")
+    if raw is not None:
+        try:
+            value = float(raw)
+            if value > 0:
+                ORG.gpW12 = value
+        except ValueError:
+            pass
+    raw = p.option("eref12")
+    if raw is not None:
+        try:
+            ORG.gpERef12 = float(raw)
+        except ValueError:
+            pass
 
     if ORG.gp:
         # One extra step after the relaxations.  It repeats the last

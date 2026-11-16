@@ -128,3 +128,15 @@ def test_opt_type_12_falls_back_when_gp_predictions_are_missing(monkeypatch):
     out = _run(monkeypatch, _org(gp=1, opt_type=12), [a, b])
     assert out[0] == pytest.approx(0.1 * (-100.0) - 2.0)
     assert out[1] == pytest.approx(0.1 * (-120.0) - 2.0)
+
+
+def test_opt_type_12_relative_energy_formula(monkeypatch):
+    """With w12/eref12 the energy is relative to the DFT baseline."""
+    monkeypatch.setattr(_cf, "calc_density", _geometric_density)
+    s = _individual12(enthalpy=-100.0, energy_gp=-28081.0, density_gp=1.9)
+    org = _org(gp=1, opt_type=12)
+    org.gpW12 = 0.6
+    org.gpERef12 = -28080.0
+    out = _run(monkeypatch, org, [s])
+    # 0.6 * (-28081 - (-28080)) / 1 - 1.9
+    assert out[0] == pytest.approx(-2.5)

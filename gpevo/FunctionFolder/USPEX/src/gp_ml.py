@@ -419,6 +419,127 @@ _ENG_GP, _UNCERT_ENG = 7, 8
 _ROW_LEN = 9
 
 
+# ─── optType 12: one convention for fitness, pred write-back and EI ───
+# The GP energy is a DFT total energy (feature.csv `etot`, ~ -28081 eV for
+# ct22), not the force-field enthalpy (~ -1132 eV), so the historical 0.1
+# coefficient is meaningless once `1 : gp` is on.  optType 12 therefore
+# works on the *relative* energy E - eref, scaled by a configurable weight
+# (INPUT `w12`, default 0.6), so the energy and density terms have comparable
+# weight.  All three consumers call the helpers below; do not duplicate the
+# formula in CalcFitness_310 / the EI selector / the pred write-back.
+_OPT12_EREF_CACHE = {}
+
+
+def opt12_factor(ORG, s):
+    """numMols normalisation of optType 12 (CalcFitness_310.py:371).
+
+    Deliberately different from ``_mol_factor`` (optType 1): optType 12
+    multiplies the mol ratio by ``sum(ORG.numMols)`` again.  With the
+    default ``numMols=[1]`` in unit tests the two happen to coincide.
+    """
+    try:
+        total = sum(ORG.numMols)
+        return (sum(map(int, s.numMols)) / max(1, total)) * total
+    except Exception:
+        return 1.0
+
+
+def opt12_energy_weight(ORG, params=None):
+    """Weight of the relative energy term (INPUT `w12`, default 0.6)."""
+    raw = params.get("w12") if params else None
+    if raw is None:
+        raw = getattr(ORG, "gpW12", None)
+    try:
+        weight = float(raw)
+    except (TypeError, ValueError):
+        weight = 0.6
+    return weight if weight > 0 else 0.6
+
+
+def opt12_energy_reference(ORG, params=None):
+    """Energy baseline (INPUT `eref12`), or the median etot of feature.csv.
+
+    ``None`` means the database is unavailable; callers then fall back to
+    the original absolute-energy formula so a CLI/restarted run keeps working
+    instead of producing NaNs.  Cached by file mtime because active learning
+    appends labelled rows between generations.
+    """
+    raw = params.get("eref12") if params else None
+    if raw is None:
+        raw = getattr(ORG, "gpERef12", None)
+    if raw is not None:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    _, _, data_dir = gp_data_paths(ORG)
+    path = os.path.join(data_dir, "feature.csv")
+    try:
+        key = (os.path.abspath(path), os.stat(path).st_mtime_ns)
+        if key in _OPT12_EREF_CACHE:
+            return _OPT12_EREF_CACHE[key]
+        with open(path, "r", encoding="utf-8", errors="replace") as fp:
+            reader = csv.reader(fp)
+            header = next(reader, None)
+            if header is None:
+                return None
+            names = [t.strip() for t in header]
+            col = names.index("etot")
+            values = []
+            for row in reader:
+                cell = row[col].strip() if col < len(row) else ""
+                try:
+                    values.append(float(cell))
+                except ValueError:
+                    continue
+        if not values:
+            return None
+        ref = float(np.median(values))
+        _OPT12_EREF_CACHE[key] = ref
+        return ref
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def opt12_fitness(ORG, s, energy, density, eref=None, weight=None):
+    """``weight*(energy-eref)/factor - density`` for GP-enabled optType 12.
+
+    ``eref=None`` keeps the historical absolute-energy formula, for runs
+    whose training database cannot be read.
+    """
+    factor = max(1e-12, opt12_factor(ORG, s))
+    if weight is None:
+        weight = opt12_energy_weight(ORG)
+    if eref is None:
+        return 0.1 * energy / factor - density
+    return weight * (energy - eref) / factor - density
+
+
+def opt12_ei_components(row, factor, eref=None, weight=None, opt_sign=1.0):
+    """(mu, sigma) of the optType 12 acquisition, in maximisation space.
+
+    mu is the negative of the minimised fitness, sigma propagates the two
+    GP uncertainties assuming independent predictions.  A row without a
+    finite energy prediction (or without a baseline) degrades to the pure
+    density target, so old gp.csv files remain usable.
+    """
+    density = float(row[_DEN_GP])
+    sigma_d = float(row[_UNCERT])
+    energy = float(row[_ENG_GP])
+    if eref is None or not math.isfinite(energy):
+        return opt_sign * density, sigma_d
+    if weight is None:
+        weight = 0.6
+    denom = max(1e-12, factor)
+    mu = opt_sign * (density - weight * (energy - eref) / denom)
+    sigma_e = float(row[_UNCERT_ENG])
+    if math.isfinite(sigma_e):
+        sigma = math.sqrt(sigma_d ** 2 + (weight * sigma_e / denom) ** 2)
+    else:
+        sigma = sigma_d
+    return mu, sigma
+
+
 def _to_sigma(uncertainty):
     """Convert uspexkit's 1.96*std half-width into a posterior std."""
     uq = _finite(uncertainty)
@@ -493,6 +614,9 @@ def parse_gp_params(ORG):
         "optType": int(getattr(ORG, "optType", 11) or 11),
         # 1 for a minimisation run, -1 for `-N : optType` (maximisation).
         "optSign": float(getattr(ORG, "opt_sign", 1) or 1),
+        # optType 12: weight and baseline of the relative energy term.
+        "w12": opt12_energy_weight(ORG),
+        "eref12": opt12_energy_reference(ORG),
     }
 
 
@@ -607,13 +731,18 @@ def _expected_improvement(mu, sigma, f_best, explore=True):
 def _ei_target(params):
     """``(mu column, sigma column, name)`` of the quantity EI is computed on.
 
-    optType 1 minimises the enthalpy, so the acquisition has to run on the GP
-    energy prediction and on *its* uncertainty (gp.csv columns 8/9); every
-    other optType keeps the density (columns 5/6), as the MATLAB reference
-    does.
+    optType 1 minimises the enthalpy, so the acquisition runs on the GP
+    energy prediction and on *its* uncertainty (gp.csv columns 8/9).
+    optType 12 optimises the combined fitness (relative energy - density),
+    so its target is synthesised per row by ``opt12_ei_components``, not
+    read from a single column.  All other optTypes keep the density
+    (columns 5/6), as the MATLAB reference does.
     """
-    if int(params.get("optType", 11) or 11) == 1:
+    opt_type = int(params.get("optType", 11) or 11)
+    if opt_type == 1:
         return _ENG_GP, _UNCERT_ENG, "eng_gp"
+    if opt_type == 12:
+        return None, None, "opt12"
     return _DEN_GP, _UNCERT, "den_gp"
 
 
@@ -665,7 +794,46 @@ def _best_observed(data_dir, column, sign):
     return float(np.min(arr)) if sign < 0 else float(np.max(arr))
 
 
-def _observed_incumbent(data_dir, target, sign):
+def _observed_opt12(data_dir, factor, eref, weight, sign=1.0):
+    """Best observed optType-12 fitness from ``feature.csv``.
+
+    The labelled rows carry both DFT ``etot`` and ``density``; combine them
+    with the same relative-energy formula the fitness uses.  ``factor`` is
+    the representative numMols normalisation of the generation (identical
+    for every structure in a fixed-composition 310 run).  ``sign`` is
+    ``opt_sign``: a negative optType maximises the raw fitness instead.
+    """
+    if not data_dir or eref is None:
+        return None
+    if weight is None:
+        weight = 0.6
+    path = os.path.join(data_dir, "feature.csv")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fp:
+            reader = csv.reader(fp)
+            header = next(reader, None)
+            if header is None:
+                return None
+            names = [t.strip() for t in header]
+            ecol, dcol = names.index("etot"), names.index("density")
+            best = None
+            for row in reader:
+                try:
+                    energy = float(row[ecol])
+                    density = float(row[dcol])
+                except (ValueError, IndexError):
+                    continue
+                value = weight * (energy - eref) / max(1e-12, factor) - density
+                if best is None:
+                    best = value
+                else:
+                    best = min(best, value) if sign > 0 else max(best, value)
+        return best
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _observed_incumbent(data_dir, target, sign, factor=None, eref=None, weight=None):
     """Best observed (DFT) value from ``<data_dir>/feature.csv``, in EI space.
 
     ``feature.csv`` holds the labelled ground truth the GP was trained on:
@@ -675,13 +843,26 @@ def _observed_incumbent(data_dir, target, sign):
     prediction; a wrong incumbent shifts every Z score and biases the pick
     toward exploitation.  The honest incumbent is the observed value.
 
-    Returns the incumbent in the *EI target space* (``sign * value``), or
+    Returns the incumbent in the *EI target space* (``sign * value``; for
+    optType 12, the negative of the best observed combined fitness), or
     ``None`` when the file is missing, empty or lacks the needed column, in
     which case the caller falls back to the predicted value.
     """
+    if target == "opt12":
+        best = _observed_opt12(data_dir, factor if factor is not None else 1.0,
+                               eref, weight, sign)
+        # mu = -opt_sign * raw fitness, so the EI-space incumbent flips back.
+        return None if best is None else -sign * best
     column = "etot" if target == "eng_gp" else "density"
     best = _best_observed(data_dir, column, sign)
     return None if best is None else sign * best
+
+
+def observed_opt12_incumbent(ORG, factor=1.0, eref=None, weight=None):
+    """EI-space incumbent for optType 12's combined acquisition."""
+    _, _, data_dir = gp_data_paths(ORG)
+    sign = float(getattr(ORG, "opt_sign", 1) or 1)
+    return _observed_incumbent(data_dir, "opt12", sign, factor, eref, weight)
 
 
 def observed_density_incumbent(ORG):
@@ -695,30 +876,55 @@ def observed_density_incumbent(ORG):
     return _best_observed(data_dir, "density", 1)
 
 
-def _select_by_ei(numbers, table, params, data_dir=None):
+def _select_by_ei(numbers, table, params, data_dir=None, factors=None):
     """EI / uncertainty / random top-K selection of one generation.
 
     Returns ``(selected, mode_label, reason, target)``: *selected* holds
     ``(number, sigma, mu, ei)`` for every crystal that cleared all gates --
-    *mu* being the GP energy for optType 1 and the GP density otherwise --
-    and *reason* is a printable sentence naming the gate that stopped the
+    *mu* being the GP energy for optType 1, the combined relative-energy
+    minus density for optType 12, and the GP density otherwise -- and
+    *reason* is a printable sentence naming the gate that stopped the
     selection (``None`` on success).
     """
     mu_col, sigma_col, target = _ei_target(params)
+    opt12_eref = params.get("eref12")
+    opt12_w = params.get("w12")
     # optType 1 on a run that carries no energy prediction at all (an old
     # gp.csv, or a gp() that failed) still has something to learn from.
     if target == "eng_gp" and not _usable(numbers, table, mu_col, sigma_col):
         console_print("  optType 1 but no GP energy prediction this generation: "
                       "the EI selection falls back to the density")
         mu_col, sigma_col, target = _DEN_GP, _UNCERT, "den_gp"
+    if target == "opt12" and (opt12_eref is None or not any(
+            row is not None and math.isfinite(row[_ENG_GP])
+            for row in (table.get(n) for n in numbers))):
+        console_print("  optType 12 but no GP energy prediction this generation: "
+                      "the EI selection falls back to the density")
+        mu_col, sigma_col, target = _DEN_GP, _UNCERT, "den_gp"
 
     # optType 1 minimises, so the acquisition runs on -energy_gp and f_best
     # is -min(energy_gp); the density is maximised and keeps mu as it is.
-    # `-N : optType` inverts both (opt_sign = -1).
+    # `-N : optType` inverts both (opt_sign = -1).  optType 12's combined mu
+    # already carries the direction (mu = -opt_sign * fitness), so EI must
+    # consume it as-is -- multiplying by opt_sign again would flip -12 runs.
     opt_sign = float(params.get("optSign", 1) or 1)
     sign = -opt_sign if target == "eng_gp" else opt_sign
+    ei_sign = 1.0 if target == "opt12" else sign
 
-    observed = _observed_incumbent(data_dir, target, sign)
+    def _mu_sigma(number, row):
+        if target != "opt12":
+            return row[mu_col], row[sigma_col]
+        return opt12_ei_components(row, (factors or {}).get(number, 1.0),
+                                   opt12_eref, opt12_w, opt_sign)
+
+    rep_factor = 1.0
+    if target == "opt12" and factors:
+        rep_factor = next(iter(factors.values()))
+        if len(set(factors.values())) > 1:
+            console_print("  optType 12: numMols differs across structures; "
+                          "the observed incumbent uses a representative factor")
+    observed = _observed_incumbent(data_dir, target, sign, rep_factor,
+                                   opt12_eref, opt12_w)
     # Step 0: f_best is the incumbent EI measures improvement against.
     # The observed best in feature.csv wins when present; only a missing or
     # empty database falls back to the GP's own (noisy) prediction.
@@ -737,20 +943,22 @@ def _select_by_ei(numbers, table, params, data_dir=None):
             continue
         if math.isfinite(row[_DEN_GP]):
             best_density = max(best_density, row[_DEN_GP])
-        mu, sigma = row[mu_col], row[sigma_col]
+        mu, sigma = _mu_sigma(number, row)
         if not (math.isfinite(mu) and math.isfinite(sigma)):
             continue
-        max_mu_ei = max(max_mu_ei, sign * mu)
+        max_mu_ei = max(max_mu_ei, ei_sign * mu)
         if observed is None:                 # predicted fallback only here
-            f_best = max(f_best, sign * mu)
+            f_best = max(f_best, ei_sign * mu)
     if filtered > 0:
         console_print(f"  Filtered out {filtered} crystals with residual > "
                       f"{RESIDUAL_CUT:g}")
     if observed is not None:
         # ``sign * observed`` is the physical value again (sign in {-1, 1}):
         # the lowest energy for optType 1, the highest density for optType 11.
+        # optType 12 stores the EI-space incumbent directly (mu = -fitness).
+        shown = -observed if target == "opt12" else sign * observed
         tee_print(
-            f"  EI incumbent: observed {target} = {sign * observed:.4f}"
+            f"  EI incumbent: observed {target} = {shown:.4f}"
             f"  (max predicted this generation = {max_mu_ei:.4f},"
             f" gap = {observed - max_mu_ei:+.4f})")
         if math.isfinite(max_mu_ei) and observed > max_mu_ei:
@@ -773,10 +981,11 @@ def _select_by_ei(numbers, table, params, data_dir=None):
         row = table.get(number)
         if row is None or row[1] > RESIDUAL_CUT:
             continue
-        mu, sigma = row[mu_col], row[sigma_col]
+        mu, sigma = _mu_sigma(number, row)
         if not (math.isfinite(mu) and math.isfinite(sigma)):
             continue
-        ei_list.append(_expected_improvement(sign * mu, sigma, f_best, explore))
+        ei_list.append(_expected_improvement(ei_sign * mu, sigma, f_best,
+                                             explore))
         crystal_list.append(number)
         uncert_list.append(sigma)
         mu_list.append(mu)
@@ -1044,9 +1253,15 @@ def _gp_active_learning(ORG, POP, fitness):
     _prune_feature_cache(numbers)
     table = metrics_table(POP, valid, numbers, os.path.join(home, "CalcFold1", "gp.csv"))
     rows_before = _db_rows(data_dir)
+    factors = None
+    if int(params["optType"]) == 12:
+        # optType 12's EI needs the same numMols normalisation as its fitness.
+        factors = {number: opt12_factor(ORG, POP.POPULATION[index])
+                   for index, number in zip(valid, numbers)}
 
     if rows_before >= _MIN_DB_ROWS and table:
-        selected, mode_label, reason, target = _select_by_ei(numbers, table, params, data_dir)
+        selected, mode_label, reason, target = _select_by_ei(
+            numbers, table, params, data_dir, factors)
         if reason is not None:
             tee_print(f"  {reason}; GP training set unchanged")
             return fitness
@@ -1186,8 +1401,14 @@ def _gp_active_learning(ORG, POP, fitness):
     # carry it too (it is 1 for a minimisation run, -1 for `-N : optType`).
     opt_sign = float(getattr(ORG, "opt_sign", 1) or 1)
 
+    # optType 12 shares the baseline/weight with CalcFitness and the EI
+    # selector; `params` already carries the resolved values.
+    opt12_eref = opt12_energy_reference(ORG, params) if opt_type == 12 else None
+    opt12_w = opt12_energy_weight(ORG, params) if opt_type == 12 else None
+
     updated = 0
     skipped = 0
+    unchanged = 0
     for index, number in zip(valid, numbers):
         row = table.get(number)
         if row is not None and row[1] > RESIDUAL_CUT:
@@ -1208,13 +1429,28 @@ def _gp_active_learning(ORG, POP, fitness):
             if value is None or not math.isfinite(float(value)):
                 continue
             fitness[index] = opt_sign * (-1.0 * float(value))
+        elif opt_type == 12:
+            # Re-predicted energy/density are both available: recompute the
+            # same relative-energy fitness CalcFitness uses.  Keep the old
+            # value (never write NaN) when either prediction is missing.
+            s = POP.POPULATION[index]
+            energy = getattr(s, "energy_gp", None)
+            density = getattr(s, "density_gp", None)
+            try:
+                energy, density = float(energy), float(density)
+            except (TypeError, ValueError):
+                energy = density = float("nan")
+            if not (math.isfinite(energy) and math.isfinite(density)):
+                unchanged += 1
+                continue
+            fitness[index] = opt_sign * opt12_fitness(
+                ORG, s, energy, density, opt12_eref, opt12_w)
         else:
-            # optType 12 combines the GP enthalpy and density predictions
-            # (0.1*energy_gp/factor - density_gp under `1 : gp`), optType 13 is
-            # the GP residual: no single ML value can replace the fitness, so
-            # keep what CalcFitness computed.
+            # optType 13 is the GP residual: no single ML value can replace
+            # the fitness, so keep what CalcFitness computed.
             continue
         updated += 1
     console_print(f"  Updated fitness for {updated}/{len(valid)} valid crystals "
-                  f"(skipped {skipped} with residual > {RESIDUAL_CUT:g})")
+                  f"(skipped {skipped} with residual > {RESIDUAL_CUT:g}"
+                  f", unchanged {unchanged})")
     return fitness

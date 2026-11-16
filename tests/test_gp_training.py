@@ -866,4 +866,127 @@ def test_ei_filter_uses_the_shared_cutoff():
     assert reason is None
 
 
+# ────────────────────────────────────────────────────────────────────
+#  optType 12: relative-energy fitness, pred write-back, combined EI
+# ────────────────────────────────────────────────────────────────────
+
+def _org12(home, res_folder, **kwargs):
+    org = _org(home, res_folder, opt_type=12, **kwargs)
+    org.gpW12 = 0.6
+    org.gpERef12 = -100.0
+    return org
+
+
+def test_optType12_pred_refreshes_fitness(run, monkeypatch):
+    """pred() re-predictions feed the same relative-energy fitness."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90),
+        _individual(12, density_gp=1.95),
+    ])
+    org = _org12(home, res_folder, k=1, u=0.0, den=0.0)
+    monkeypatch.setattr(gp_ml, "_call", _FakeCalls())
+
+    out = gp_active_learning(org, population, np.array([-1.0, -1.0]))
+
+    # w12*(E - eref)/factor - density = 0.6*(-99 + 100)/2 - 1.75 = -1.45
+    assert out[0] == pytest.approx(-1.45)
+    assert out[1] == pytest.approx(-1.45)
+
+
+class _FakeNaNPred(_FakeCalls):
+    def __call__(self, name, cwd=None, **kwargs):
+        ok, result = super().__call__(name, cwd, **kwargs)
+        if name == "pred":
+            for entry in result.values():
+                entry["energy_pred"] = float("nan")
+        return ok, result
+
+
+def test_optType12_pred_nan_keeps_old_fitness(run, monkeypatch):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90)])
+    org = _org12(home, res_folder, k=1, u=0.0, den=0.0)
+    monkeypatch.setattr(gp_ml, "_call", _FakeNaNPred())
+
+    out = gp_active_learning(org, population, np.array([-1.0]))
+    assert out[0] == pytest.approx(-1.0)
+    assert not np.isnan(out).any()
+
+
+def test_optType12_high_residual_is_not_updated(run, monkeypatch):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, residual=11.0, density_gp=1.90),
+        _individual(12, residual=1.0, density_gp=1.95),
+    ])
+    org = _org12(home, res_folder, k=2, u=0.0, den=0.0)
+    monkeypatch.setattr(gp_ml, "_call", _FakeCalls())
+
+    out = gp_active_learning(org, population, np.array([-1.0, -1.0]))
+    assert out[0] == pytest.approx(-1.0)     # residual > 10, left alone
+    assert out[1] == pytest.approx(-1.45)
+
+
+def test_optType12_ei_uses_the_combined_energy_and_density(run, monkeypatch):
+    """Equal densities: the lower GP energy must win the EI selection."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, energy_gp=-5.0, sigma_eng=0.10),
+        _individual(12, density_gp=1.90, energy_gp=-6.0, sigma_eng=0.10),
+    ])
+    org = _org12(home, res_folder, k=1, u=0.0, den=0.0)
+    org.gpW12 = 1.0
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+    assert fake.ids_of("calc") == ["12"]
+
+
+def test_optType12_negative_sign_ei_direction(run, monkeypatch):
+    """`-12 : optType` maximises the fitness: EI's direction must flip once."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    # Labelled etot below the candidates so the improvement term is positive
+    # and the pick is decided by the acquisition direction, not exploration.
+    with open(os.path.join(data_dir, "feature.csv"), "w") as fd:
+        fd.write(_HEADER + "\n")
+        for i in range(4):
+            fd.write(f"{i}, -20.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.9\n")
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, energy_gp=-5.0, sigma_eng=0.10),
+        _individual(12, density_gp=1.90, energy_gp=-6.0, sigma_eng=0.10),
+    ])
+    org = _org12(home, res_folder, k=1, u=0.0, den=0.0)
+    org.gpW12 = 1.0
+    org.opt_sign = -1
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+    assert fake.ids_of("calc") == ["11"]   # higher raw fitness wins when maximising
+
+
+def test_optType12_falls_back_to_density_without_energy(run, monkeypatch, capsys):
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, energy_gp=float("nan")),
+        _individual(12, density_gp=1.95, energy_gp=float("nan")),
+    ])
+    org = _org12(home, res_folder, k=1, u=0.0, den=0.0)
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(org, population, np.array([-1.0, -1.0]))
+    assert fake.ids_of("calc") == ["12"]
+    assert "falls back to the density" in capsys.readouterr().out
+
+
 

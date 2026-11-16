@@ -141,6 +141,8 @@ ei        : mode          % ei | random | uncertainty
 sklearn   : gpbackend     % GP training backend: sklearn (default) | gpytorch (opt-in)
 200       : gpiter        % max L-BFGS iterations per restart (gpytorch only)
 0.1       : gplr          % L-BFGS learning rate (gpytorch only)
+0.6       : w12           % optType 12 + gp: weight on (GP energy - eref12)/factor
+-28081    : eref12        % optType 12 energy baseline (default: median etot of <data>/feature.csv)
 ```
 
 `gpbackend` / `gpiter` / `gplr` select the opt-in GPyTorch training backend (`pip install gpevo[gpytorch]`). With the default `sklearn` backend nothing changes. GPyTorch is a **different model** (LinearKernel / RBFKernel parameterisation, L-BFGS on the exact marginal log likelihood, GaussianLikelihood noise), so its OUTPUT.txt values are not byte-for-byte comparable with the sklearn/MATLAB parity run, and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and no longer needs an external uspexkit install.
@@ -190,11 +192,14 @@ Which quantity EI uses as its acquisition function is decided by `optType`:
 |---|---|---|
 | `1` (enthalpy minimisation) | GP predicted energy `energy_gp`, negated (minimisation) | `uncertainty_eng` |
 | `-1` (enthalpy maximisation) | the same, taken positive (maximisation) | `uncertainty_eng` |
+| `12` (density + relative energy) | combined fitness `w12*(energy_gp-eref12)/factor − density_gp`, negated (minimisation) | `sqrt(σ_density² + (w12*σ_energy/factor)²)` |
 | Others (default 11, etc.) | GP predicted density `density_gp` (maximisation) | `uncertainty` |
 
-`den` (density gate) is unaffected and always applies to the predicted density; `u` (±1.96σ) applies to the σ of the corresponding acquisition target, so with optType 1 its unit is energy (eV) and should be tuned to the scale of the energy uncertainty. When no structure in a generation has a usable energy prediction (an old `gp.csv`, or `gp()` failed), a note is printed and it falls back to density.
+`den` (density gate) is unaffected and always applies to the predicted density; `u` (±1.96σ) applies to the σ of the corresponding acquisition target, so with optType 1 its unit is energy (eV) and with optType 12 it is the propagated uncertainty of the combined fitness. When no structure in a generation has a usable energy prediction (an old `gp.csv`, or `gp()` failed), a note is printed and it falls back to density.
 
 With `1 : gp`, optType 1 also ranks on the GP-predicted enthalpy for **fitness** itself (`use_gp_energy` in `CalcFitness_310`), not the force-field enthalpy the relaxation leaves in `Enthalpies`; optType 11 has the equivalent `use_gp_density`. `Enthalpies` stays unchanged and is still used for the failed-structure check.
+
+optType 12 deserves a note: the GP "energy" is a **DFT total energy** from `feature.csv` (~ −28081 eV for ct22), not the force-field enthalpy (~ −1132 eV), so the old hard-coded `0.1` coefficient is meaningless once `1 : gp` is on. The fitness is now `w12*(energy_gp - eref12)/factor − density_gp`: `w12` (default 0.6) and `eref12` (default: median `etot` of the training data) are INPUT options, and the EI acquisition uses the same weight so the active loop improves exactly what the fitness ranks on. After `uspexkit.pred()` retrains, optType 12 fitness is recomputed from the new predictions. With `1 : gp` off, the historical force-field formula is kept. Changing `w12`/`eref12` changes the fitness scale and makes an existing run's checkpoint non-comparable — start a fresh run.
 
 Pipeline:
 

@@ -139,6 +139,8 @@ ei        : mode          % ei | random | uncertainty
 sklearn   : gpbackend     % GP 训练后端：sklearn（默认）| gpytorch（可选）
 200       : gpiter        % 每次重启的 L-BFGS 最大迭代数（仅 gpytorch）
 0.1       : gplr          % L-BFGS 学习率（仅 gpytorch）
+0.6       : w12           % optType 12 + gp：相对能量项 (GP能量 - eref12)/factor 的权重
+-28081    : eref12        % optType 12 能量基线（默认取 <data>/feature.csv 里 etot 的中位数）
 ```
 
 `gpbackend` / `gpiter` / `gplr` 控制可选的 GPyTorch 训练后端（`pip install gpevo[gpytorch]`）。默认 `sklearn` 时行为完全不变。GPyTorch 是**另一套模型**（LinearKernel / RBFKernel 参数化、在精确边际似然上做 L-BFGS、GaussianLikelihood 噪声），其 OUTPUT.txt 数值与 sklearn/MATLAB 对拍运行不逐字节可比，学习曲线会打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不再依赖外部安装的 uspexkit。
@@ -188,11 +190,14 @@ EI 用哪个量做采集函数，由 `optType` 决定：
 |---|---|---|
 | `1`（焓极小） | GP 预测能量 `energy_gp` 取负（极小化） | `uncertainty_eng` |
 | `-1`（焓极大） | 同上取正（极大化） | `uncertainty_eng` |
+| `12`（密度 + 相对能量） | 组合适应度 `w12*(energy_gp-eref12)/factor − density_gp` 取负（极小化） | `sqrt(σ_density² + (w12*σ_energy/factor)²)` |
 | 其它（默认 11 等） | GP 预测密度 `density_gp`（极大化） | `uncertainty` |
 
-`den`（密度门）不受此影响，始终作用在预测密度上；`u`（±1.96σ）则作用在对应采集量的 σ 上，因此 optType 1 时它的单位是能量（eV），按能量不确定度的量级调即可。整代没有一个结构带可用的能量预测时（老 gp.csv 或 gp() 失败），会打印一行提示并退回密度。
+`den`（密度门）不受此影响，始终作用在预测密度上；`u`（±1.96σ）则作用在对应采集量的 σ 上，因此 optType 1 时它的单位是能量（eV），optType 12 时是组合适应度传播后的不确定度。整代没有一个结构带可用的能量预测时（老 gp.csv 或 gp() 失败），会打印一行提示并退回密度。
 
 开启 `1 : gp` 时，optType 1 的 **fitness** 本身也用 GP 预测焓（`CalcFitness_310` 的 `use_gp_energy`），而不是弛豫留在 `Enthalpies` 里的力场焓；optType 11 有对应的 `use_gp_density`。`Enthalpies` 保持原值，仍用于失败结构判定。
+
+optType 12 需要特别注意：GP 的"能量"是 `feature.csv` 里的 **DFT 总能量**（ct22 约 −28081 eV），不是力场焓（约 −1132 eV），所以启用 `1 : gp` 后旧的硬编码 `0.1` 系数失去意义。现在适应度为 `w12*(energy_gp - eref12)/factor − density_gp`：`w12`（默认 0.6）与 `eref12`（默认训练集 `etot` 的中位数）均可从 INPUT 配置，EI 采集用同一套权重，主动学习改善的正是 fitness 排序的量。`uspexkit.pred()` 重训后，optType 12 的 fitness 会用新预测值重算。`1 : gp` 关闭时保持原来的力场公式。改 `w12`/`eref12` 会改变 fitness 量级，使旧 run 的 checkpoint 不可比——请开新 run。
 
 流程：
 

@@ -30,6 +30,7 @@ from gpevo.log_utils import console_print, write_log
 from gpevo.runtime import RESIDUAL_CUT
 from gpevo.FunctionFolder.USPEX.src.gp_ml import (
     _expected_improvement, gp_plot_enabled, observed_density_incumbent,
+    observed_opt12_incumbent, opt12_ei_components, opt12_factor,
     parse_gp_params, UNCERT_SCALE,
 )
 
@@ -78,6 +79,7 @@ def collect_records(POP):
             # and the ``u`` gate; EI's closed form needs the posterior std.
             "sigma": _f("uncertainty"),
             "sd": _f("uncertainty") / UNCERT_SCALE,
+            "sd_eng": _f("uncertainty_eng") / UNCERT_SCALE,
             "residual": _f("residual"),
             "dft": bool(gp.get("dft", False)),
             "energy_pred": _f("energy_pred"),
@@ -100,16 +102,33 @@ def _ei_preview(records, params, incumbent=None):
     valid = [r for r in records if r["residual"] <= RESIDUAL_CUT]
     if not valid:
         return [], float("-inf"), []
+    opt_type = int(params.get("optType", 11) or 11)
+    opt_sign = float(params.get("optSign", 1) or 1)
+    # optType 12 ranks on the combined energy/density fitness; the preview
+    # must use the same mu/sigma as gp_ml._select_by_ei (no energy -> density).
+    opt12 = opt_type == 12 and params.get("eref12") is not None
+
+    def _mu_sd(r):
+        if opt12:
+            factor = float(params.get("factor12") or 1.0)
+            row = [0, 0, 0, 0, r["dgp"], r["sd"], 0,
+                   r["energy_pred"], r["sd_eng"]]
+            return opt12_ei_components(row, factor, params.get("eref12"),
+                                       params.get("w12"), opt_sign)
+        return r["dgp"], r["sd"]
+
     f_best = (incumbent if incumbent is not None and math.isfinite(incumbent)
-              else max(r["dgp"] for r in valid))
+              else max(_mu_sd(r)[0] for r in valid))
+    explore = bool(params.get("explore", True))
     scored = []
     for r in valid:
-        ei = _expected_improvement(r["dgp"], r["sd"], f_best)
-        scored.append((ei, r))
+        mu, sd = _mu_sd(r)
+        ei = _expected_improvement(mu, sd, f_best, explore)
+        scored.append((ei, r, sd))
     scored.sort(key=lambda t: -t[0])
-    top = [(ei, r) for ei, r in scored[:max(1, int(params["k"]))]]
-    selected = [(ei, r) for ei, r in top
-                if r["sigma"] > params["u"] and r["dgp"] >= params["den"]]
+    top = scored[:max(1, int(params["k"]))]
+    selected = [(ei, r) for ei, r, sd in top
+                if sd * UNCERT_SCALE > params["u"] and r["dgp"] >= params["den"]]
     top_density = sorted(valid, key=lambda r: -r["dgp"])[:5]
     return selected, f_best, top_density
 
@@ -169,7 +188,13 @@ def plot_gp_generation(ORG, POP, fitness=None, out_path=None):
     # The status report must rank EI against the same incumbent as the real
     # selection; only the density objective shares that physical quantity.
     incumbent = None
-    if int(params.get("optType", 11) or 11) != 1:
+    opt_type = int(params.get("optType", 11) or 11)
+    if opt_type == 12 and params.get("eref12") is not None and records:
+        factor = opt12_factor(ORG, POP.POPULATION[0])
+        params["factor12"] = factor
+        incumbent = observed_opt12_incumbent(
+            ORG, factor, params.get("eref12"), params.get("w12"))
+    elif opt_type != 1:
         incumbent = observed_density_incumbent(ORG)
     selected, f_best, top_density = _ei_preview(records, params, incumbent)
     sel_numbers = {r["number"] for _, r in selected}

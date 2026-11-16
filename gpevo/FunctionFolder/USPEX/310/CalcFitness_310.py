@@ -9,7 +9,10 @@ from gpevo.runtime import G
 from gpevo.log_utils import console_print
 from gpevo.matrix import det
 from gpevo.FunctionFolder.sys.elementMass import calc_density
-from gpevo.FunctionFolder.USPEX.src.gp_ml import gp_active_learning, gp_enabled
+from gpevo.FunctionFolder.USPEX.src.gp_ml import (
+    gp_active_learning, gp_enabled,
+    opt12_energy_reference, opt12_energy_weight, opt12_fitness,
+)
 from .use_gp_density import use_gp_density
 from .use_gp_energy import use_gp_energy
 
@@ -332,6 +335,14 @@ def CalcFitness_310():
     weighted13 = 0
     fallback13 = 0
     w_e13, w_v13, w_c13, w13 = _opt_type_13_weights(ORG)
+    # optType 12 + `1 : gp` uses a relative-energy fitness; resolve the
+    # baseline/weight once per generation instead of once per individual.
+    opt12_gp = gp_enabled(ORG) and int(getattr(ORG, "optType", 1) or 1) == 12
+    eref12 = opt12_energy_reference(ORG) if opt12_gp else None
+    w12 = opt12_energy_weight(ORG) if opt12_gp else None
+    if opt12_gp:
+        console_print(f"  optType 12: w12={w12:g}, "
+                      f"eref12={eref12 if eref12 is not None else 'auto (no database)'}")
     # optType 14 needs the target fingerprint(s) once per generation, not
     # once per individual.  Raises early with a clear message on bad config.
     target_fps = (_target_fingerprints(ORG)
@@ -359,17 +370,23 @@ def CalcFitness_310():
             density = calc_density(s.numIons, ORG.atomType, volume)
             density = use_gp_density(s, density)
             fitness[i] = -1.0 * float(density if density is not None else 0.0)
-        elif ORG.optType == 12:                              # 0.1*enthalpy/factor - density
+        elif ORG.optType == 12:                              # weighted (E-Eref)/factor - density
             volume = det(np.asarray(s.LATTICE).reshape(3, 3))
             density = calc_density(s.numIons, ORG.atomType, volume)
-            # With `1 : gp` both terms are the GP predictions (energy_gp and
-            # density_gp); with the GP off they stay the force-field enthalpy
-            # and the geometric density.
+            density = float(density if density is not None else 0.0)
             if gp_enabled(ORG):
+                # With `1 : gp` both terms are GP predictions.  The energy is
+                # a DFT total energy (not the force-field enthalpy), so use
+                # the relative form E - eref with the configurable weight to
+                # keep it comparable with the density term.
                 enthalpy = use_gp_energy(s, enthalpy)
-                density = use_gp_density(s, density)
-            factor = (sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))) * sum(ORG.numMols)
-            fitness[i] = 0.1 * enthalpy / max(1e-12, factor) - float(density if density is not None else 0.0)
+                density = float(use_gp_density(s, density) or 0.0)
+                fitness[i] = opt12_fitness(ORG, s, enthalpy, density,
+                                           eref12, w12)
+            else:
+                # GP off keeps the historical force-field formula.
+                factor = (sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))) * sum(ORG.numMols)
+                fitness[i] = 0.1 * enthalpy / max(1e-12, factor) - density
         elif ORG.optType == 13:                              # distance to dataset
             # CalcFitness_310.m:46-53 uses POPULATION(i).distance, which is the
             # GP residual (Hilbert-space distance to the training set).  It is

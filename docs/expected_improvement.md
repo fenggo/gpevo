@@ -104,11 +104,16 @@ EI 选择由 `gp_ml.py` 里几个函数串起来：
 ### 5.2 选哪个量 → `_ei_target`（L474）
 
 ```python
-if optType == 1:  return _ENG_GP, _UNCERT_ENG, "eng_gp"   # 能量列 (7,8)
-return _DEN_GP, _UNCERT, "den_gp"                          # 密度列 (4,5)
+if optType == 1:   return _ENG_GP, _UNCERT_ENG, "eng_gp"   # 能量列 (7,8)
+if optType == 12:  return None, None, "opt12"               # 组合量，逐行合成
+return _DEN_GP, _UNCERT, "den_gp"                           # 密度列 (4,5)
 ```
 
 - `optType = 1`（焓最小化）→ 在**能量**维度上算 EI
+- `optType = 12`（密度 + 相对能量）→ 在**组合适应度**维度上算 EI：
+  `mu = opt_sign*(density_gp − w12*(energy_gp-eref12)/factor)`，
+  `sigma = sqrt(σ_density² + (w12*σ_energy/factor)²)`（由 `gp_ml.opt12_ei_components`
+  逐行合成，`u` 门作用在组合 σ，`den` 门仍作用在密度）
 - 其它（密度最大化，`optType = 11`）→ 在**密度**维度上算
 
 列索引常量化在 L309-310：`_DEN_GP=4, _UNCERT=5, _ENG_GP=7, _UNCERT_ENG=8`。
@@ -196,7 +201,8 @@ sign = -opt_sign if target == "eng_gp" else opt_sign
 | `mode` | `ei : mode` | `ei` \| `uncertainty` \| `random` | — |
 | `u` | `0.04 : u` | 不确定度门（**1.96σ 下界**，超过才送 DFT） | **跟随 EI 目标维度**：能量维是 eV 量级（data22 实测 σ 中位数 ~0.59 eV），密度维是 g/cm³ 量级（~0.04）。注意这是 95% 半宽的标度，不是 EI 里的 σ；换算关系是 `σ > u/1.96` |
 | `den` | `1.8 : den` | 密度门（`density_gp ≥ den` 才送 DFT） | 永远盯预测密度，与 optType 无关 |
-| `optType` | `1 : optType` | 1=焓最小化（能量 EI），11=密度最大化（密度 EI） | `-N` 写法=对应最大化/最小化翻转，经 `opt_sign` 进入 `sign` |
+| `optType` | `1 : optType` | 1=焓最小化（能量 EI），12=密度+相对能量（组合 EI），11=密度最大化（密度 EI） | `-N` 写法=对应最大化/最小化翻转，经 `opt_sign` 进入 `sign` |
+| `w12` / `eref12` | `0.6 : w12` / `-28081 : eref12` | optType 12 能量项权重与基线（`eref12` 缺省取训练集 etot 中位数） | 改这两个值会改变 fitness 量级，旧 run 的 checkpoint 不可比 |
 
 ---
 

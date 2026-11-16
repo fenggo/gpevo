@@ -70,6 +70,10 @@ def createORGDefault():
     ORG.gpBackend = "sklearn"   # sklearn | gpytorch (opt-in GPyTorch backend)
     ORG.gpTrainingIter = 200    # max L-BFGS iterations per restart (gpytorch)
     ORG.gpLr = 0.1              # L-BFGS learning rate (gpytorch)
+    # optType 12 with `1 : gp`: weight on (energy - baseline)/factor and an
+    # optional fixed baseline.  None = median etot of <data>/feature.csv.
+    ORG.gpW12 = 0.6
+    ORG.gpERef12 = None
     ORG.gpPlot = 0              # opt-in with `1 : gpplot` for gp_gen<N>.png
     ORG.opt_sign = 1
     ORG.dimension = 3
