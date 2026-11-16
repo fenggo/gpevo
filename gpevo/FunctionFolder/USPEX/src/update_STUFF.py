@@ -15,7 +15,7 @@ from gpevo.FunctionFolder.USPEX.src.createORG_Symmetry import createORG_Symmetry
 from gpevo.FunctionFolder.USPEX.src.createORG_Onthefly import createORG_Onthefly
 from gpevo.FunctionFolder.USPEX.src.update_STUFF_old import update_STUFF_old
 from gpevo.FunctionFolder.USPEX.src.variation_common import build_tournament
-from gpevo.log_utils import console_print
+from gpevo.log_utils import tee_print
 
 # AutoFrac operator names, in the order used by update_STUFF.m.
 PARENTS = ["Random", "Heredity", "Permutate", "TransMutate", "LatMutate", "softmutate", "Rotate"]
@@ -161,7 +161,7 @@ def update_STUFF(inputFile, goodFrac=None, ranking=None):
             ORG.fracTrans = 0.0
             ORG.howManyTrans = 0
         except Exception as exc:
-            console_print(f"RL bandit disabled: {exc}")
+            tee_print(f"RL bandit disabled: {exc}")
             update_STUFF_old(inputFile, goodFrac, ranking)
     elif not int(getattr(ORG, "AutoFrac", 0)):
         update_STUFF_old(inputFile, goodFrac, ranking)

@@ -251,14 +251,16 @@ angle  : RL_inner        % 内层只动旋转角
 `history` 每条记录一代的 `generation / trials / wins / f / u`，可用于审计和作图
 （看配额轨迹、各幅度 `u` 的演化）。
 
-控制台每代会打印两行：
+每代会打印两行，**同时写入 `OUTPUT.txt`**（`tee_print`，与 `console_print` 的终端专属性不同）：
 
 ```
 RL bandit: f = [ 0.10 0.10 0.08 0.22 0.30 0.20 ]   % 六臂配额
 RL bandit: inner = rotationAngleMax                 % 仅当 RL_inner 非 all 时
 ```
 
-若加载了跨任务先验，还会打印 `RL bandit: loaded cross-task prior from ...`。
+若加载了跨任务先验，还会打印并写入 `RL bandit: loaded cross-task prior from ...`；
+`RL_inner` 拼错、先验损坏、bandit 异常降级（`RL bandit disabled: ...`）、导出失败等信息
+也同样进入 `OUTPUT.txt`。
 
 ---
 

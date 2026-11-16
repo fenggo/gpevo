@@ -128,6 +128,29 @@ def test_rl_inner_is_read_from_input(tmp_path):
     path.write_text("angle : RL_inner\n", encoding="utf-8")
     assert InputParser(str(path)).option("RL_inner") == "angle"
 
+
+def test_rl_report_is_teed_into_output_txt(tmp_path, monkeypatch):
+    """The per-generation RL report is archived in OUTPUT.txt, not just stdout."""
+    from gpevo.log_utils import configure_log, close_log
+    from gpevo.FunctionFolder.USPEX.src.RL_agent import RL_agent
+
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "OUTPUT.txt"
+    G["ORG_STRUC"] = _org(RL_inner="angle")
+    G["POP_STRUC"] = _pop()
+    configure_log(str(log))           # patches builtins.print -> restore below
+    try:
+        RL_agent(10)
+    finally:
+        close_log()
+        G["ORG_STRUC"] = None
+        G["POP_STRUC"] = None
+
+    text = log.read_text(encoding="utf-8")
+    assert "RL bandit: f = [" in text
+    assert "RL bandit: inner = rotationAngleMax" in text
+
+
 def _all_elite_pop():
     """Six offspring of one arm, all in the elite pool, with a spread of gains."""
     pop = AttrDict()

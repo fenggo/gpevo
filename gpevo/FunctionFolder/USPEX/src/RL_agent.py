@@ -13,7 +13,7 @@ import re
 import numpy as np
 
 from gpevo.runtime import G
-from gpevo.log_utils import console_print
+from gpevo.log_utils import tee_print
 
 STATE_FILE = "rl_agent_state.pkl"
 PRIOR_NAME = "operator_prior.pkl"
@@ -81,9 +81,9 @@ def _inner_params(ORG):
             continue
         pairs = INNER_TOKENS.get(token)
         if pairs is None:
-            console_print("  RL bandit: RL_inner token '" + token + "' unknown "
-                          "(angle | translation | mutation | softstep | rotate |"
-                          " latmut | softmut | all | none)")
+            tee_print("  RL bandit: RL_inner token '" + token + "' unknown "
+                      "(angle | translation | mutation | softstep | rotate |"
+                      " latmut | softmut | all | none)")
             continue
         chosen.update(pairs)
     return chosen or set(INNER_ALL)
@@ -174,9 +174,9 @@ def _fuse_prior(state):
                 for k in range(min(2, len(prior_inner[a]))):
                     state["inner"][a][k]["m"] = float(prior_inner[a][k]["m"])
                     state["inner"][a][k]["neff"] += float(prior_inner[a][k]["neff"])
-        console_print(f"RL bandit: loaded cross-task prior from {source}")
+        tee_print(f"RL bandit: loaded cross-task prior from {source}")
     except Exception as exc:
-        console_print(f"RL bandit: prior ignored ({exc})")
+        tee_print(f"RL bandit: prior ignored ({exc})")
     return state
 
 
@@ -320,7 +320,7 @@ def RL_agent(popSize):
                                      * (LOG_SCALE_HI - LOG_SCALE_LO))
     if inner_params != INNER_ALL:
         names = ", ".join(sorted(INNER_LABEL[pair] for pair in inner_params))
-        console_print("  RL bandit: inner = " + (names if names else "none"))
+        tee_print("  RL bandit: inner = " + (names if names else "none"))
 
     state.setdefault("history", []).append(
         {
@@ -340,7 +340,7 @@ def RL_agent(popSize):
     if int(getattr(ORG, "RL_autoExport", 0)):
         RL_export_prior(state)
 
-    console_print("RL bandit: f = [" + " ".join(f"{v:.2f}" for v in f) + " ]")
+    tee_print("RL bandit: f = [" + " ".join(f"{v:.2f}" for v in f) + " ]")
     return f
 
 
@@ -361,4 +361,4 @@ def RL_export_prior(state):
             pickle.dump(prior, fh)
         os.replace(tmp, path)
     except Exception as exc:
-        console_print(f"RL bandit: export failed ({exc})")
+        tee_print(f"RL bandit: export failed ({exc})")
