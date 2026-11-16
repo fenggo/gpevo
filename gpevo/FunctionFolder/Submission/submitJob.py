@@ -39,13 +39,14 @@ def _code_exec_line(ORG, code, step):
     from gpevo.FunctionFolder.USPEX.src.gp_ml import is_gp_step
 
     if is_gp_step(ORG, step):
-        from gpevo.FunctionFolder.USPEX.src.gp_ml import _ncpu
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import _ncpu, gp_feature
 
         # The GP step is vendored: no external ``uspexkit`` package is needed
         # on the compute node.  Keep the same arguments, plus the training
         # backend options from INPUT.txt.
         return (f"python -m gpevo.uspexkit.cli gp --n={_ncpu(ORG)} "
                 f"--data={ORG.gpData} --den={ORG.gpDen} --u={ORG.gpU} "
+                f"--f={gp_feature(ORG)} "
                 f"--k={ORG.gpK} --mode={ORG.gpMode} --optype={ORG.optType} "
                 f"--backend={getattr(ORG, 'gpBackend', 'sklearn')} "
                 f"--iter={getattr(ORG, 'gpTrainingIter', 200)} "

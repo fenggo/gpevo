@@ -131,6 +131,8 @@ The option groups below are all **optional extensions** — omit them and the de
 data11_22 : data          % training-data directory (used directly by gp() if present, otherwise built by this run)
 1.8       : den           % density gate: gp()'s --den, also the lower density bound of the CalcFitness EI gate
 0.04      : u             % uncertainty threshold (±1.96σ); a structure is sent to DFT only above it
+1         : f             % feature-vector type for gp()/pred(): 1=10-D (default), 2=10-D per molecule, 3=7-D
+                         % (`feature` is an alias); only optType 1/11/12 with 1 : gp use it, optType 13 stays at 1
 2         : k             % number of EI top-K picks per generation
 ei        : mode          % ei | random | uncertainty
 2         : nboot         % structures labelled in the first batch when the training set is empty (default 2, must be ≥2)

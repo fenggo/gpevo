@@ -196,8 +196,10 @@ theta mean ~ alpha/(alpha+beta) = [0.9999 ...]
 `core.py:190-201`：`f==2` 把**查询** feature 的能量列除以 `nmol`，注释明说
 「训练数据 d 保持原始总能量不动」；`pred()` 的 `core.py:708,756` 同样。若启用 `f=2`，
 查询向量（~ -67）与训练矩阵（~ -538）不在一个标度，GP 预测与 `res` 全部失真。
-`createORG_AbinitCode.py:16` 的 `_GP_OPTIONS` 不含 `f`，所以 gpevo 进程内路径恒为 `f=1`，
-但 CLI 可以走到。建议要么对训练特征做同样归一化，要么在 GP 路径里禁用 `f=2`。
+`1 : f` / `1 : feature` 现在已从 INPUT.txt 解析并传入 `gp()` / `pred()`
+（见 `gp_ml.gp_feature()`），但只对 optType 1/11/12 且 `1 : gp` 生效；optType 13
+的加权 10 维距离固定用 `f=1`。启用 `f=2` 前要么对训练特征做同样归一化，
+要么继续用默认的 `f=1`。
 
 ---
 

@@ -7,7 +7,7 @@ used to emit, so gpevo no longer depends on an installed ``uspexkit`` package
 on the compute node::
 
     python -m gpevo.uspexkit.cli gp --n=24 --data=data22 --den=1.8 \
-        --u=0.03 --k=1 --mode=ei --optype=11 \
+        --u=0.03 --f=1 --k=1 --mode=ei --optype=11 \
         --backend=sklearn --iter=200 --lr=0.1
 
 The argument set mirrors the ``gp`` subcommand of the upstream uspexkit CLI,

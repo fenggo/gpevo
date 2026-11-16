@@ -60,6 +60,7 @@ def createORGDefault():
     ORG.gp = 0
     ORG.gpData = "data"
     ORG.gpDen = 0.0
+    ORG.gpFeature = 1       # INPUT `f` / `feature`: feature-vector type for gp()/pred()
     ORG.gpNcpu = 0          # 0 = fall back to % numProcessors
     ORG.gpU = 0.04          # uncertainty threshold of the active learning
     ORG.gpK = 1             # top-K crystals selected per generation

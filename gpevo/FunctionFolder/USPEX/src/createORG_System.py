@@ -100,29 +100,29 @@ def createORG_System(inputFile):
     # optType 13 only: per-column weights on the GP residual when it is turned
     # into fitness (CalcFitness_310).  In the 10-D ReaxFF feature etot is
     # column 0, evdw column 4, ecoul column 8 and density the last column;
-    # 1.0 reproduces the raw residual.  Defaults: etot 0.01, evdw 0.2,
-    # ecoul 0.2, density 0.1.  The residual stored by gp() itself
+    # 1.0 reproduces the raw residual.  Defaults: etot 0.0, evdw 0.0001,
+    # ecoul 0.0001, density 0.01.  The residual stored by gp() itself
     # (gp.csv / OOD gates / EI) is never touched.
     raw = p.option("densityWeight")
     try:
-        ORG.densityWeight = float(raw) if raw is not None else 0.1
+        ORG.densityWeight = float(raw) if raw is not None else 0.01
     except (TypeError, ValueError):
-        ORG.densityWeight = 0.1
+        ORG.densityWeight = 0.01
     raw = p.option("etotWeight")
     try:
-        ORG.etotWeight = float(raw) if raw is not None else 0.01
+        ORG.etotWeight = float(raw) if raw is not None else 0.0
     except (TypeError, ValueError):
-        ORG.etotWeight = 0.01
+        ORG.etotWeight = 0.0
     raw = p.option("ecoulWeight")
     try:
-        ORG.ecoulWeight = float(raw) if raw is not None else 0.2
+        ORG.ecoulWeight = float(raw) if raw is not None else 0.0001
     except (TypeError, ValueError):
-        ORG.ecoulWeight = 0.2
+        ORG.ecoulWeight = 0.0001
     raw = p.option("evdwWeight")
     try:
-        ORG.evdwWeight = float(raw) if raw is not None else 0.2
+        ORG.evdwWeight = float(raw) if raw is not None else 0.0001
     except (TypeError, ValueError):
-        ORG.evdwWeight = 0.2
+        ORG.evdwWeight = 0.0001
 
     raw = p.scalar("calculationType")
     if raw is not None:

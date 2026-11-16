@@ -272,6 +272,26 @@ def _backend_ready(backend):
     return False
 
 
+# optTypes whose fitness is a GP prediction (energy / density) may choose the
+# feature vector; optType 13 ranks on the column-weighted 10-D distance and
+# must stay on f=1, so the INPUT `f` / `feature` selector is ignored there.
+_GP_FEATURE_OPT_TYPES = (1, 11, 12)
+
+
+def gp_feature(ORG):
+    """Effective feature-vector type for the GP step (INPUT `f` / `feature`).
+
+    f=1 is the 10-D descriptor, f=2 the nmol-averaged 10-D descriptor, any
+    other value the 7-D descriptor.  Only optType 1/11/12 with `1 : gp`
+    honour it; every other optType keeps f=1 (the historical default).
+    """
+    if not gp_enabled(ORG):
+        return 1
+    if int(getattr(ORG, "optType", 1) or 1) not in _GP_FEATURE_OPT_TYPES:
+        return 1
+    return int(_opt(ORG, "gpFeature", 1) or 1)
+
+
 def run_gp(ORG, cwd=None, id_=None):
     """Run ``uspexkit.gp(...)``; returns its metrics dict (None on failure)."""
     backend = _gp_backend(ORG)
@@ -281,6 +301,7 @@ def run_gp(ORG, cwd=None, id_=None):
         "n": _ncpu(ORG),
         "dat": str(getattr(ORG, "gpData", "data") or "data"),
         "den": float(getattr(ORG, "gpDen", 0.0) or 0.0),
+        "f": gp_feature(ORG),
         "optype": int(getattr(ORG, "optType", 11) or 11),
         "backend": backend,
         "training_iter": int(_opt(ORG, "gpTrainingIter", 200)),
@@ -447,6 +468,7 @@ def parse_gp_params(ORG):
         "ncpu": _ncpu(ORG),
         "dat": str(_opt(ORG, "gpData", "data")),
         "den": float(_opt(ORG, "gpDen", 0.0)),
+        "f": gp_feature(ORG),
         # ``u`` is a floor on the REPORTED 1.96*std uncertainty (gp.csv
         # column 6/10), not on the posterior std the EI formula uses.
         "u": float(_opt(ORG, "gpU", _EI_DEFAULTS["u"])),
@@ -1140,7 +1162,7 @@ def _gp_active_learning(ORG, POP, fitness):
         return fitness
     console_print(f"  Running: uspexkit.pred(ids='{' '.join(str(i) for i in pred_ids)}')")
     ok, results = _call("pred", cwd=res_folder, t="Individuals.traj", step=100,
-                        ncpu=int(params["ncpu"]), den=0.0,
+                        ncpu=int(params["ncpu"]), den=0.0, f=int(params["f"]),
                         ids=" ".join(str(i) for i in pred_ids), dat=params["dat"],
                         features=features or None,
                         backend=params["backend"],

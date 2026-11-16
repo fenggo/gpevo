@@ -157,8 +157,8 @@ def _gp_columns(s):
                 pass
     if not all(np.isfinite(v) for v in values):
         return " " * 54
-    # Residual = Hilbert-space distance to the training set (optType 13's
-    # objective).  Left blank when the GP step did not report one.
+    # Residual = Hilbert-space distance to the training set.  Left blank when
+    # the GP step did not report one.
     residual = float("nan")
     for name in ("residual", "distance"):
         try:
@@ -168,6 +168,22 @@ def _gp_columns(s):
         if np.isfinite(candidate):
             residual = candidate
             break
+    # optType 13 optimises a *column-weighted* 10-D distance, not the raw GP
+    # residual, so the RESIDUAL column would otherwise disagree with the value
+    # being selected on.  OUTPUT.txt rows are written during relaxation, before
+    # CalcFitness_310() has produced the fitness array, so recompute the very
+    # same value here via the shared helper.  The raw s.residual / s.distance
+    # stay untouched (gp.csv, the OOD gates and EI still need them).
+    ORG = G.get("ORG_STRUC")
+    if ORG is not None and int(getattr(ORG, "optType", 1) or 1) == 13 \
+            and np.isfinite(residual):
+        if getattr(s, "gp_feature", None) is not None:
+            from importlib import import_module
+            cf = import_module("gpevo.FunctionFolder.USPEX.310.CalcFitness_310")
+            residual = cf.opt_type_13_fitness(ORG, s, residual)[0]
+        # CalcFitness_310 applies the run's optimisation sign at the end, so
+        # mirror it here for both the weighted value and the raw fallback.
+        residual *= float(getattr(ORG, "opt_sign", 1) or 1)
     res_s = f"{residual:10.4f}" if np.isfinite(residual) else " " * 10
     return (f"{values[0]:12.3f}{values[1]:10.4f}{values[2]:12.3f}"
             f"{values[3]:10.4f}{res_s}")

@@ -14,7 +14,8 @@ from gpevo.FunctionFolder.USPEX.src.gp_ml import csv_rows
 
 # Options of the GP block; `gp` is the switch, the rest only matter when it is on.
 _GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot",
-               "cache", "explore", "gpbackend", "gpiter", "gplr", "gpplot")
+               "cache", "explore", "gpbackend", "gpiter", "gplr", "gpplot",
+               "f", "feature")
 
 
 def _nonempty_block(lines):
@@ -195,6 +196,19 @@ def createORG_AbinitCode(inputFile):
     if raw is not None:
         try:
             ORG.gpDen = float(raw)
+        except ValueError:
+            pass
+    # Feature-vector type passed to uspexkit gp()/pred(): `1 : f` or
+    # `1 : feature` (both spellings, both colon orders).  f=1 is the 10-D
+    # feature, f=2 the nmol-averaged 10-D feature, any other value the 7-D
+    # feature.  See gp_ml.gp_feature() for the optType gate.
+    raw = p.option("f")
+    if raw is None:
+        raw = p.option("feature")
+    ORG.gpFeature = 1
+    if raw is not None:
+        try:
+            ORG.gpFeature = int(float(raw))
         except ValueError:
             pass
     raw = p.option("ncpu")

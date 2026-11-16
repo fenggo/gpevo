@@ -129,6 +129,8 @@ print(frames[0].get_potential_energy())        # 焓 (eV)
 data11_22 : data          % 训练数据目录（已有则直接用于 gp() 训练，没有则由本运行自己建）
 1.8       : den           % 密度门：gp() 的 --den，同时是 CalcFitness EI 门的密度下限
 0.04      : u             % 不确定度阈值（±1.96σ），超过才送 DFT
+1         : f             % gp()/pred() 的特征向量类型：1=10 维（默认），2=10 维按分子平均，3=7 维
+                         % （`feature` 为别名）；仅 optType 1/11/12 且 1 : gp 时生效，optType 13 固定为 1
 2         : k             % 每代 EI top-K 个数
 ei        : mode          % ei | random | uncertainty
 2         : nboot         % 训练集为空时首批打标签的结构数（默认 2，需 ≥2）

@@ -91,6 +91,29 @@ def _weighted_feature_distance(ORG, s, residual, etot_weight, evdw_weight,
     return float(np.sum(weights * row * row)), True
 
 
+def _opt_type_13_weights(ORG):
+    """The four optType-13 column weights, with the documented defaults."""
+    def _w(name, default):
+        raw = getattr(ORG, name, default)
+        return float(raw) if raw is not None else default
+    return (_w("etotWeight", 0.0), _w("evdwWeight", 0.0001),
+            _w("ecoulWeight", 0.0001), _w("densityWeight", 0.01))
+
+
+def opt_type_13_fitness(ORG, s, residual, weights=None):
+    """The value optType 13 actually optimises (the weighted 10-D distance).
+
+    Shared with ``WriteGenerationOutput_310._gp_columns`` so OUTPUT.txt's
+    Residual column shows exactly the fitness.  Returns ``(value, ok)``;
+    ``ok`` is False when the 10-D feature or the training file are missing,
+    in which case the raw residual is returned -- the same fallback
+    ``CalcFitness_310`` applies.
+    """
+    if weights is None:
+        weights = _opt_type_13_weights(ORG)
+    return _weighted_feature_distance(ORG, s, residual, *weights)
+
+
 # optType 14: fingerprints of the fixed target structure(s).  Keyed by
 # (path, mtime_ns, RmaxFing, sigmaFing, deltaFing, dimension, atomType,
 #  bond_cut, molecule).  Recomputed only when the file or the fingerprint
@@ -308,14 +331,7 @@ def CalcFitness_310():
     missing_fp = 0
     weighted13 = 0
     fallback13 = 0
-    raw_e13 = getattr(ORG, "etotWeight", 0.01)
-    w_e13 = float(raw_e13) if raw_e13 is not None else 0.01
-    raw_v13 = getattr(ORG, "evdwWeight", 0.2)
-    w_v13 = float(raw_v13) if raw_v13 is not None else 0.2
-    raw_c13 = getattr(ORG, "ecoulWeight", 0.2)
-    w_c13 = float(raw_c13) if raw_c13 is not None else 0.2
-    raw_w13 = getattr(ORG, "densityWeight", 0.1)
-    w13 = float(raw_w13) if raw_w13 is not None else 0.1
+    w_e13, w_v13, w_c13, w13 = _opt_type_13_weights(ORG)
     # optType 14 needs the target fingerprint(s) once per generation, not
     # once per individual.  Raises early with a clear message on bad config.
     target_fps = (_target_fingerprints(ORG)
@@ -365,12 +381,12 @@ def CalcFitness_310():
             if _usable(dist):
                 # Recompute the very same nearest-neighbour 10-D distance, but
                 # with etot / evdw / ecoul / density scaled by their weights
-                # (defaults 0.01 / 0.2 / 0.2 / 0.1).  The residual itself
+                # (defaults 0.0 / 0.0001 / 0.0001 / 0.01).  The residual itself
                 # (gp.csv, OOD gates, EI) is left alone.  Without the 10-D
                 # feature -- CLI / restarted runs only read scalars back from
                 # gp.csv -- keep the raw residual.
-                fitness[i], ok = _weighted_feature_distance(
-                    ORG, s, dist, w_e13, w_v13, w_c13, w13)
+                fitness[i], ok = opt_type_13_fitness(
+                    ORG, s, dist, (w_e13, w_v13, w_c13, w13))
                 if ok:
                     weighted13 += 1
                 else:
