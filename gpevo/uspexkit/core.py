@@ -410,6 +410,13 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
 def calcdata(traj='structures.traj',n=8,c='nn',step=1000,f=1):
     ''' c: calculator, which mathine learning potential to be used
         f: feature 模式 (1=原始总能量; 2=能量项按分子数平均, 密度除外) '''
+    # generate_hbond_lib() 在 dst 已存在时直接复用，不会检查它是否与当前
+    # reaxff_nn.lib / ffield 一致。calcdata 是全量重算，先删掉这三个派生的
+    # 氢键 lib，强制按当前力场重新生成，避免用到陈旧参数。
+    for lib in ('reaxff_nn_cho.lib', 'reaxff_nn_chn.lib', 'reaxff_nn_chc.lib'):
+        if exists(lib):
+            os.remove(lib)
+
     images      = Trajectory(traj)
     traj_       = TrajectoryWriter('structures_mlp.traj',mode='w')
 

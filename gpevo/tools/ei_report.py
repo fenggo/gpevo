@@ -337,7 +337,7 @@ def _evolution_figure(summary, rows, dft):
     import matplotlib.pyplot as plt
 
     gens = sorted(summary)
-    fig, ax = plt.subplots(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(16, 8))
 
     for gen in gens:
         ids = summary[gen]["ids"]
@@ -379,16 +379,18 @@ def _evolution_figure(summary, rows, dft):
                            label=dft_label)
                 dft_label = None
 
-    ax.set_xlabel("Generation")
-    ax.set_ylabel(r"Density (g/cm$^3$)")
-    ax.set_xticks(gens)
+    ax.set_xlabel("Generation", fontsize=32)
+    ax.set_ylabel(r"Density (g/cm$^3$)", fontsize=32)
+    ax.set_xticks([g for g in gens if g % 5 == 0
+                   or g in (gens[0], gens[-1])])
     ax.set_xlim(min(gens) - 0.6, max(gens) + 0.6)
     ax.grid(True, alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=24)
     handles, labels = ax.get_legend_handles_labels()
     seen = {}
     for handle, label in zip(handles, labels):
         seen.setdefault(label, handle)
-    ax.legend(seen.values(), seen.keys(), loc="lower right", fontsize=9,
+    ax.legend(seen.values(), seen.keys(), loc="lower right", fontsize=32,
               framealpha=0.9)
     return fig, ax
 
@@ -398,8 +400,8 @@ def plot_evolution(summary, rows, dft, out_png):
         fig, ax = _evolution_figure(summary, rows, dft)
     except Exception as exc:                      # pragma: no cover
         return f"  (evolution plot skipped: {exc})"
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    fig.tight_layout(pad=2.0)
+    fig.savefig(out_png, dpi=150)
     import matplotlib.pyplot as plt
     plt.close(fig)
     return f"  Saved {out_png}"
@@ -435,13 +437,14 @@ def _convergence_figure(ei_series):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    fig, ax = plt.subplots(figsize=(16, 8))
     if not ei_series:
         ax.text(0.5, 0.5, "no crystal was labelled: ei.log is empty",
                 transform=ax.transAxes, ha="center", va="center", fontsize=11,
                 color="#c0392b")
-        ax.set_xlabel("Generation")
-        ax.set_ylabel(r"Density (g/cm$^3$)")
+        ax.set_xlabel("Generation", fontsize=32)
+        ax.set_ylabel(r"Density (g/cm$^3$)", fontsize=32)
+        ax.tick_params(axis="both", labelsize=24)
         return fig, ax
 
     # best-so-far as generations advance, on the density the search computed
@@ -493,15 +496,18 @@ def _convergence_figure(ei_series):
                    color="#c0392b", edgecolors="#641e16", linewidths=0.8,
                    zorder=7, label="DFT density of selected")
 
-    ax.set_xlabel("Generation")
-    ax.set_ylabel(r"Density (g/cm$^3$)")
-    ax.set_xticks(sorted({entry["gen"] for entry in ei_series}))
+    ax.set_xlabel("Generation", fontsize=32)
+    ax.set_ylabel(r"Density (g/cm$^3$)", fontsize=32)
+    ei_gens = sorted({entry["gen"] for entry in ei_series})
+    ax.set_xticks([g for g in ei_gens if g % 5 == 0
+                   or g in (ei_gens[0], ei_gens[-1])])
     ax.grid(True, alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=24)
     handles, labels = ax.get_legend_handles_labels()
     seen = {}
     for handle, label in zip(handles, labels):
         seen.setdefault(label, handle)
-    ax.legend(seen.values(), seen.keys(), loc="lower right", fontsize=9,
+    ax.legend(seen.values(), seen.keys(), loc="lower right", fontsize=32,
               framealpha=0.9)
     return fig, ax
 
@@ -519,8 +525,8 @@ def plot_convergence(ei_series, out_png):
         fig, ax = _convergence_figure(ei_series)
     except Exception as exc:                      # pragma: no cover
         return f"  (convergence plot skipped: {exc})"
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    fig.tight_layout(pad=2.0)
+    fig.savefig(out_png, dpi=150)
     import matplotlib.pyplot as plt
     plt.close(fig)
     message = f"  Saved {out_png}"
@@ -564,7 +570,7 @@ def plot_learning(summary, learning, out_png):
     plot_labelled = [l for l, ok in zip(labelled, has_data) if ok]
     plot_rmses = [r for r, ok in zip(rmses, has_data) if ok]
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.0))
+    fig, ax = plt.subplots(figsize=(16, 8))
     # The second axis only holds LOO RMSE / label counts.  Without learning
     # data an unconditional twinx() leaves a meaningless 0-1 scale on the
     # right, so create it only when there is something to put on it.
@@ -577,7 +583,8 @@ def plot_learning(summary, learning, out_png):
         ax.plot([g for g, _ in pairs], [s for _, s in pairs],
                 "o-", color="#8e44ad", lw=1.8, ms=5,
                 label="mean UC of EI selected")
-        ax.set_ylabel(r"Mean GP uncertainty (g/cm$^3$)", color="black")
+        ax.set_ylabel(r"Mean GP uncertainty (g/cm$^3$)", color="black",
+                      fontsize=32)
     if any(map(math.isfinite, plot_top10)):
         pairs = [(g, t) for g, t in zip(plot_gens, plot_top10)
                  if math.isfinite(t)]
@@ -587,15 +594,20 @@ def plot_learning(summary, learning, out_png):
     if has_twin and any(map(math.isfinite, plot_rmses)):
         twin.plot(plot_gens, plot_rmses, "s--", color="#d35400", lw=1.6, ms=5,
                   label="LOO RMSE (density)")
-        twin.set_ylabel(r"LOO RMSE (g/cm$^3$)", color="#d35400")
+        twin.set_ylabel(r"LOO RMSE (g/cm$^3$)", color="#d35400",
+                        fontsize=32)
     if has_twin and any(map(math.isfinite, plot_labelled)):
         twin.bar(plot_gens, [0.0 if not math.isfinite(v) else v for v in plot_labelled],
                  width=0.5, color="#27ae60", alpha=0.25,
                  label="labels added in this generation")
-    ax.set_xlabel("Generation")
-    ax.set_xticks(plot_gens)
+    ax.set_xlabel("Generation", fontsize=32)
+    ax.set_xticks([g for g in plot_gens if g % 5 == 0
+                   or g in (plot_gens[0], plot_gens[-1])])
     ax.set_xlim(min(plot_gens) - 0.5, max(plot_gens) + 0.5)
     ax.grid(True, alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=24)
+    if twin is not None:
+        twin.tick_params(axis="y", labelsize=24)
     main_handles, main_labels = ax.get_legend_handles_labels()
     twin_handles, twin_labels = (twin.get_legend_handles_labels()
                                  if twin is not None else ([], []))
@@ -603,10 +615,10 @@ def plot_learning(summary, learning, out_png):
     seen = {}
     for handle, label in zip(handles, labels):
         seen.setdefault(label, handle)
-    ax.legend(seen.values(), seen.keys(), loc="upper right", fontsize=9,
+    ax.legend(seen.values(), seen.keys(), loc="upper right", fontsize=32,
               framealpha=0.9)
-    fig.tight_layout()
-    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    fig.tight_layout(pad=2.0)
+    fig.savefig(out_png, dpi=150)
     plt.close(fig)
     return f"  Saved {out_png}"
 
