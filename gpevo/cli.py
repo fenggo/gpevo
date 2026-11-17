@@ -296,6 +296,9 @@ def _build_parser():
                               help="StructureMatcher interaxial angle tolerance (deg)")
     parser_dedup.add_argument("--keep-id", type=int, nargs="*", default=None,
                               help="indices (0-based) to prefer as cluster representatives")
+    parser_dedup.add_argument("--packing-traj", default=None,
+                              help="companion trajectory (e.g. MLP-relaxed) for the packing test; "
+                                   "frames must align 1:1 with the input trajectory")
     parser_dedup.add_argument("--dry-run", action="store_true",
                               help="report duplicates but write no output trajectory")
     parser_dedup.add_argument("--quiet", action="store_true",
@@ -404,7 +407,8 @@ def main(argv=None):
         dedup(traj=args.traj, output=args.output, report=args.report,
               de_tol=args.de_tol, ltol=args.ltol, stol=args.stol,
               angle_tol=args.angle_tol, keep_id=args.keep_id,
-              dry_run=args.dry_run, quiet=args.quiet)
+              dry_run=args.dry_run, quiet=args.quiet,
+              packing_traj=args.packing_traj)
         return
 
     raise SystemExit(f"unknown command: {args.command}")

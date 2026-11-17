@@ -144,3 +144,44 @@ def test_feature_residual_catches_pair_with_large_energy_gap(tmp_path):
     assert result["keep"] == [1, 2]
     assert result["n_feature_only"] == 1
     assert len(read(str(tmp_path / "out.traj"), index=":")) == 2
+
+
+def test_packing_traj_uses_companion_geometry(tmp_path):
+    """DFT frames differ geometrically; companion MLP frames match."""
+    from gpevo.tools.dedup import dedup
+    # Input (DFT-like): same composition, but geometries far apart so
+    # StructureMatcher fails -> no duplicate under the default packing source.
+    dft = [
+        _atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]], -1.0),
+        _atoms([6, 6, 6], [[0, 0, 0], [0.3, 0.4, 0.5]], -1.5),
+    ]
+    traj = _write(tmp_path, dft)
+    # Companion (MLP-like): two identical, matching frames, same order.
+    companion = [
+        _atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]]),
+        _atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]]),
+    ]
+    comp_path = str(tmp_path / "companion.traj")
+    write(comp_path, companion)
+    with open(tmp_path / "feature_mlp.csv", "w") as fd:
+        fd.write(", etot, ebond, eang, etor, evdw, ehb_cho,ehb_chn,ehb_chc, ecoul, density\n")
+        for k in range(2):
+            fd.write(f"{k}," + ",".join(["1.0"] * 10) + "\n")
+
+    # Without companion: packing fails, both kept (energy gap 0.5 eV too).
+    assert dedup(traj, output=str(tmp_path / "a.traj"), quiet=True)["keep"] == [0, 1]
+    # With companion: packing succeeds on MLP geometry -> duplicate cluster.
+    result = dedup(traj, output=str(tmp_path / "b.traj"),
+                   packing_traj=comp_path, quiet=True)
+    assert result["groups"] == [([0, 1], 1)]
+    assert result["keep"] == [1]
+
+
+def test_packing_traj_frame_count_mismatch(tmp_path):
+    from gpevo.tools.dedup import dedup
+    path = _write(tmp_path, _fixture())
+    comp_path = str(tmp_path / "short.traj")
+    write(comp_path, [_atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]])])
+    with pytest.raises(RuntimeError, match="packing trajectory has 1 frames"):
+        dedup(path, output=str(tmp_path / "out.traj"),
+              packing_traj=comp_path, quiet=True)

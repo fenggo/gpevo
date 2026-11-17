@@ -21,6 +21,14 @@ The feature vectors come from ``feature_mlp.csv`` next to the input trajectory
 (rows are index-aligned with its frames).  If that file is absent the feature
 leg is skipped and the old structure+energy criterion applies unchanged.
 
+When the input trajectory holds DFT-relaxed geometries, the same crystal can
+relax to distinct DFT minima and fail ``StructureMatcher`` even though its
+ReaxFF feature vector (computed on the MLP-relaxed geometry) is identical.
+Pass ``packing_traj`` pointing at that MLP-relaxed trajectory to run the packing
+similarity test on the MLP geometries instead.  It must have the same number
+of frames, in the same order, as the input trajectory; energies and the
+representative choice still come from the input trajectory.
+
 Duplicates are grouped by complete-linkage clustering, so every pair inside a
 reported cluster satisfies both criteria (single linkage is transitive and
 over-merges: a~b and b~c does not imply a~c).
@@ -104,13 +112,15 @@ def _cliques(adjacency):
 
 def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
           angle_tol=3.0, keep_id=None, dry_run=False, quiet=False,
-          feature=None, feature_tol=0.005):
+          feature=None, feature_tol=0.005, packing_traj=None):
     """Deduplicate *traj*; return a result dict and optionally write files.
 
     Parameters mirror the original ``dedup_traj.py``.  ``quiet=True`` suppresses
     the human-readable report but still writes ``output`` / ``report``.
     ``feature=None`` auto-detects ``feature_mlp.csv`` beside *traj*; pass an
     explicit path to override, or a missing path to use structure+energy only.
+    ``packing_traj`` runs the packing test on a companion trajectory (e.g. the
+    MLP-relaxed geometries) whose frames must align 1:1 with *traj*.
     """
     from ase.io import read, write
     try:
@@ -161,6 +171,24 @@ def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
     else:
         say(f"warning: {feature_path} not found; using structure+energy only")
 
+    # Packing geometry: normally the frames themselves, but a companion MLP
+    # trajectory can be supplied when DFT relaxation scatters identical
+    # crystals into distinct minima.  Energies/representatives still use
+    # `images`, so only the geometry source changes here.
+    if packing_traj is not None:
+        try:
+            packing_images = list(read(packing_traj, index=":"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"could not read packing trajectory {packing_traj}: {exc}") from exc
+        if len(packing_images) != n_total:
+            raise RuntimeError(
+                f"packing trajectory has {len(packing_images)} frames, "
+                f"expected {n_total} (same order as {traj})")
+        say(f"packing similarity from {packing_traj} ({n_total} frames)")
+    else:
+        packing_images = images
+
     preferred = set(keep_id or ())
     matcher = StructureMatcher(ltol=ltol, stol=stol, angle_tol=angle_tol,
                                primitive_cell=True, scale=False,
@@ -198,7 +226,8 @@ def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
             f"pairs (|dE| < {dmax * 1000:.0f} meV or feature "
             f"residual < {feature_tol:g})")
 
-        structures = {i: adaptor.get_structure(images[i]) for i in members}
+        structures = {i: adaptor.get_structure(packing_images[i])
+                      for i in members}
 
         adjacency = {i: set() for i in members}
         edges = []
