@@ -214,6 +214,28 @@ def _build_parser():
     parser_mol.add_argument("--no-verbose", dest="verbose",
                             action="store_false",
                             help="reduce output verbosity")
+    parser_lib = subparsers.add_parser(
+        "lib",
+        help="convert ffield.json to reaxff_nn.lib",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_lib.add_argument("--json", "--jsonfile", dest="jsonfile",
+                            default="ffield.json",
+                            help="input ffield.json")
+    parser_lib.add_argument("--lib", "--libfile", dest="libfile",
+                            default="reaxff_nn.lib",
+                            help="output ReaxFF lib file")
+    parser_ffield = subparsers.add_parser(
+        "ffield",
+        help="convert ffield.json to ReaxFF ffield",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_ffield.add_argument("--json", "--jsonfile", dest="jsonfile",
+                               default="ffield.json",
+                               help="input ffield.json")
+    parser_ffield.add_argument("--ffield", "--ffieldfile", dest="ffieldfile",
+                               default="ffield",
+                               help="output ffield file")
     parser_pack = subparsers.add_parser(
         "pack",
         help="pack structures into a gatheredPOSCARS file",
@@ -352,6 +374,14 @@ def main(argv=None):
         from gpevo.uspexkit.core import molinfo
         molinfo(gen=args.gen, i=args.i, jsonfile=args.jsonfile,
                 verbose=args.verbose)
+        return
+    if args.command == "lib":
+        from gpevo.uspexkit.core import lib
+        lib(jsonfile=args.jsonfile, libfile=args.libfile)
+        return
+    if args.command == "ffield":
+        from gpevo.uspexkit.core import ffield
+        ffield(jsonfile=args.jsonfile, ffieldfile=args.ffieldfile)
         return
     if args.command == "pack":
         from gpevo.uspexkit.core import pack
