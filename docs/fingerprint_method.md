@@ -1,5 +1,11 @@
 ## Fingerprint-Based Structure Characterization for Crystal Structure Prediction
 
+> **Scope note.** The RDF fingerprint discussed here is a *structural*
+> descriptor used by the USPEX evolutionary engine. It is distinct from the
+> 10-D ReaxFF energy/density feature vector used by `gp()` and `gpevo dedup`;
+> for the latter see `nn_residual_table.md` (Supplementary Information on the
+> nearest-neighbour residual table).
+
 ### 1. Fingerprint Descriptor
 
 The fingerprint, originally proposed by Oganov and Valle [1], encodes the local chemical environment of a crystal structure into a fixed-length vector representation. For a structure containing \(N\) atoms of \(S\) species in a periodic cell of volume \(V\), the fingerprint is defined as a discretized, Gaussian-smeared radial distribution function (RDF).

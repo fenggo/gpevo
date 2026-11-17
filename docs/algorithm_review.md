@@ -13,6 +13,7 @@
 > - `uq_active_learning.md`：UQ 主动学习闭环与核函数选型。
 > - `feature_ablation.md`：结构指纹并入 10 维特征无效（含打乱对照），结论是「数据量比特征设计更值得投入」。
 > - `fingerprint_method.md`：RDF 指纹与 Cython 加速。
+> - `nn_residual_table.md`：10 维 ReaxFF 特征的近邻残差表（`data11/nn_residual_table.py`）及 0.005 判据的实测尺度；注意与 RDF 指纹是两套不同描述符。
 > - `rl_bandit_design.md` / `rl_bandit_tutorial.md`：L2 分层 bandit 的设计与消融。
 > - `molecule_damage_check.md`：分子损坏漏检与 4 条建议（**尚未实现，优先级最高**，见 §4）。
 > - `rotation_operator.md` / `strain_matrix.md`：旋转算子默认行为、strainMatrix 谱系字段。
