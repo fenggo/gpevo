@@ -119,3 +119,28 @@ def test_cli_subcommand_registered(tmp_path, capsys):
     main(["dedup", path, "-o", out, "--quiet"])
     assert os.path.exists(out)
     assert len(read(out, index=":")) == 3
+
+
+def test_feature_residual_catches_pair_with_large_energy_gap(tmp_path):
+    """Same packing but 0.5 eV apart: energy says no, features say yes."""
+    from gpevo.tools.dedup import dedup
+    images = [
+        _atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]], -1.0),
+        _atoms([4, 4, 4], [[0, 0, 0], [0.5, 0.5, 0.5]], -1.5),
+        _atoms([5, 5, 5], [[0, 0, 0], [0.25, 0.3, 0.35]], -1.0),
+    ]
+    path = _write(tmp_path, images)
+    # feature_mlp.csv next to the trajectory; rows index-aligned with frames.
+    with open(tmp_path / "feature_mlp.csv", "w") as fd:
+        fd.write(", etot, ebond, eang, etor, evdw, ehb_cho,ehb_chn,ehb_chc, ecoul, density\n")
+        fd.write("0," + ",".join(["1.0"] * 10) + "\n")
+        fd.write("1," + ",".join(["1.0"] * 10) + "\n")   # identical to 0
+        fd.write("2," + ",".join(["2.0"] * 10) + "\n")
+
+    result = dedup(path, output=str(tmp_path / "out.traj"), quiet=True)
+    # representative = lowest energy (frame 1, -1.5 eV)
+    assert result["groups"] == [([0, 1], 1)]
+    assert result["redundant"] == [0]
+    assert result["keep"] == [1, 2]
+    assert result["n_feature_only"] == 1
+    assert len(read(str(tmp_path / "out.traj"), index=":")) == 2

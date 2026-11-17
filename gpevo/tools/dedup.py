@@ -7,7 +7,19 @@ A structure is a duplicate of another only when BOTH hold:
   1. packing similarity  : pymatgen ``StructureMatcher`` matches the two cells
                            (rotation-, origin- and cell-setting-invariant, the
                            same criterion as COMPACK)
-  2. energetic degeneracy: |E_i - E_j| < ``de_tol`` (default 2 meV)
+  2. either energetic degeneracy (|E_i - E_j| < ``de_tol``, default 2 meV)
+     OR feature-vector proximity (squared distance in the raw 10-D ReaxFF
+     feature space < ``feature_tol``, default 0.005 -- the same criterion
+     ``gp()`` uses)
+
+The second leg exists because DFT total energies drift by several meV for the
+same crystal (re-read / re-relaxed), while the ReaxFF single-point features are
+stable to ~1e-5.  A pair that is structurally identical but 7 meV apart in DFT
+is still a duplicate when its feature residual is small.
+
+The feature vectors come from ``feature_mlp.csv`` next to the input trajectory
+(rows are index-aligned with its frames).  If that file is absent the feature
+leg is skipped and the old structure+energy criterion applies unchanged.
 
 Duplicates are grouped by complete-linkage clustering, so every pair inside a
 reported cluster satisfies both criteria (single linkage is transitive and
@@ -91,11 +103,14 @@ def _cliques(adjacency):
 
 
 def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
-          angle_tol=3.0, keep_id=None, dry_run=False, quiet=False):
+          angle_tol=3.0, keep_id=None, dry_run=False, quiet=False,
+          feature=None, feature_tol=0.005):
     """Deduplicate *traj*; return a result dict and optionally write files.
 
     Parameters mirror the original ``dedup_traj.py``.  ``quiet=True`` suppresses
     the human-readable report but still writes ``output`` / ``report``.
+    ``feature=None`` auto-detects ``feature_mlp.csv`` beside *traj*; pass an
+    explicit path to override, or a missing path to use structure+energy only.
     """
     from ase.io import read, write
     try:
@@ -123,6 +138,29 @@ def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
         say(f"warning: {n_missing} frame(s) have no energy; skipping the "
             "energy-degeneracy criterion (packing similarity only)")
 
+    # 10-D ReaxFF features, index-aligned with the trajectory frames.  Same
+    # representation and threshold as gp()'s residual check (core.raw_residual).
+    feature_path = feature or os.path.join(os.path.dirname(traj) or ".",
+                                           "feature_mlp.csv")
+    features = None
+    if os.path.exists(feature_path):
+        try:
+            raw = np.loadtxt(feature_path, delimiter=",", skiprows=1)
+            if raw.ndim == 1:
+                raw = raw.reshape(1, -1)
+            cols = raw[:, 1:11]
+            if cols.shape == (n_total, 10):
+                delta = cols[:, None, :] - cols[None, :, :]
+                features = np.einsum("ijk,ijk->ij", delta, delta)
+            else:
+                say(f"warning: {feature_path} has {cols.shape[0]} rows for "
+                    f"{n_total} frames; skipping the feature criterion")
+        except (OSError, ValueError) as exc:
+            say(f"warning: could not read {feature_path} ({exc}); "
+                "skipping the feature criterion")
+    else:
+        say(f"warning: {feature_path} not found; using structure+energy only")
+
     preferred = set(keep_id or ())
     matcher = StructureMatcher(ltol=ltol, stol=stol, angle_tol=angle_tol,
                                primitive_cell=True, scale=False,
@@ -135,38 +173,53 @@ def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
         by_size.setdefault((len(atoms), atoms.get_chemical_formula()), []).append(i)
 
     clusters = []
+    feature_only_total = 0
     for members in by_size.values():
         if len(members) < 2:
             continue
 
-        # Candidate pairs: energy-degenerate only (cheap, and criterion 2
-        # anyway).  A generous prefilter avoids building pymatgen structures
-        # for pairs that cannot possibly match.
+        # Candidate pairs: cheap prefilter on either leg of criterion 2.
+        # The generous energy window and the feature window avoid building
+        # pymatgen structures for pairs that cannot possibly match.
         dmax = de_tol * 6.0
         candidates = []
         for x in range(len(members)):
             for y in range(x + 1, len(members)):
                 i, j = members[x], members[y]
-                if not use_energy or abs(energies[i] - energies[j]) < dmax:
+                energy_ok = (not use_energy or
+                             abs(energies[i] - energies[j]) < dmax)
+                feature_ok = (features is not None and
+                              features[i, j] < feature_tol)
+                if energy_ok or feature_ok:
                     candidates.append((i, j))
         if not candidates:
             continue
         say(f"[{len(images[members[0]])} atoms] {len(candidates)} candidate "
-            f"pairs (|dE| < {dmax * 1000:.0f} meV)")
+            f"pairs (|dE| < {dmax * 1000:.0f} meV or feature "
+            f"residual < {feature_tol:g})")
 
         structures = {i: adaptor.get_structure(images[i]) for i in members}
 
         adjacency = {i: set() for i in members}
         edges = []
+        n_feature_only = 0
         for i, j in candidates:
-            if use_energy and abs(energies[i] - energies[j]) >= de_tol:
+            energy_ok = (not use_energy or
+                         abs(energies[i] - energies[j]) < de_tol)
+            feature_ok = (features is not None and
+                          features[i, j] < feature_tol)
+            if not energy_ok and not feature_ok:
                 continue
             if matcher.fit(structures[i], structures[j]):
                 rms = matcher.get_rms_dist(structures[i], structures[j])
                 edges.append((i, j, float(rms[0]) if rms else float("nan")))
                 adjacency[i].add(j)
                 adjacency[j].add(i)
-        say(f"[{len(images[members[0]])} atoms] {len(edges)} duplicate edges")
+                if feature_ok and not energy_ok:
+                    n_feature_only += 1
+        feature_only_total += n_feature_only
+        say(f"[{len(images[members[0]])} atoms] {len(edges)} duplicate edges "
+            f"({n_feature_only} caught by feature only)")
         clusters += _cliques(adjacency)
 
     # One representative per cluster.
@@ -220,6 +273,7 @@ def dedup(traj, output=None, report=None, de_tol=0.002, ltol=0.1, stol=0.3,
         "keep": keep,
         "output": None if dry_run else out,
         "report": report,
+        "n_feature_only": feature_only_total,
     }
 
 
