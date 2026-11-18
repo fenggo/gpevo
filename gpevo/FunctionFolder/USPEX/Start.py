@@ -323,6 +323,12 @@ def Start():
         _save_parameters("INPUT.txt", ORG.resFolder)
         seed, source = _setup_rng(ORG)
         console_print(f"  RNG seed: {seed} (fresh, {source})")
+        # Fresh GP runs: make the force field used by the search match the
+        # one its training database was built with, before any CalcFold gets
+        # a copy of Specific/.  No-op unless "1 : gp" is set; sync_ffield_json
+        # never raises, so a bad/missing file cannot abort startup.
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import sync_ffield_json
+        sync_ffield_json(ORG)
         CreateCalcFolder(1)
         Initialize()
         CreateCalcFolder()

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import json
 import math
 import os
 import pickle
@@ -623,6 +624,57 @@ def parse_gp_params(ORG):
 def gp_enabled(ORG):
     """True when INPUT.txt enabled the GP with ``1 : gp``."""
     return int(getattr(ORG, "gp", 0) or 0) == 1
+
+
+def sync_ffield_json(ORG):
+    """Keep ``<home>/Specific/ffield.json`` in sync with the GP data copy.
+
+    Called once on a fresh GP-enabled run, before any CalcFold is created.
+    The GP database (``<home>/<gpData>/ffield.json``) holds the force field the
+    features were computed with; ``Specific/ffield.json`` is the one the search
+    actually uses.  If they differ semantically (JSON content, ignoring key
+    order and whitespace) the Specific copy is backed up to ``ffield.json.bak``
+    and replaced with the data copy.  A failure is logged to the terminal only
+    and never aborts the run.  Returns one of ``"disabled"``, ``"no-data"``,
+    ``"no-specific"``, ``"equal"``, ``"synced"``, ``"error"``.
+    """
+    if not gp_enabled(ORG):
+        return "disabled"
+    home, _, data_dir = gp_data_paths(ORG)
+    specific_dir = os.path.join(home, str(
+        getattr(ORG, "specificFolder", "Specific") or "Specific"))
+    src = os.path.join(data_dir, "ffield.json")
+    dst = os.path.join(specific_dir, "ffield.json")
+
+    if not os.path.isfile(src):
+        console_print(f"  GP ffield sync: data copy {src} not found; skipped")
+        return "no-data"
+    if not os.path.isfile(dst):
+        console_print(f"  GP ffield sync: Specific copy {dst} not found; skipped")
+        return "no-specific"
+
+    try:
+        with open(src, "r", encoding="utf-8", errors="replace") as fh:
+            src_obj = json.load(fh)
+        with open(dst, "r", encoding="utf-8", errors="replace") as fh:
+            dst_obj = json.load(fh)
+    except (OSError, ValueError) as exc:
+        console_print(f"  GP ffield sync: could not parse ffield.json ({exc}); skipped")
+        return "error"
+
+    if src_obj == dst_obj:
+        return "equal"
+
+    try:
+        shutil.copy2(dst, dst + ".bak")       # backup first, overwrite is irreversible
+        shutil.copy2(src, dst)
+    except OSError as exc:
+        console_print(f"  GP ffield sync: could not replace Specific copy ({exc})")
+        return "error"
+    console_print(f"  GP ffield sync: Specific/ffield.json differed from "
+                  f"{os.path.basename(data_dir)}/ffield.json; backed up old copy "
+                  f"to ffield.json.bak and copied the data version")
+    return "synced"
 
 
 def gp_plot_enabled(ORG):
