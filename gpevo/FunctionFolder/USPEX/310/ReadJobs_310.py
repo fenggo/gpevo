@@ -11,6 +11,7 @@ import numpy as np
 from gpevo.runtime import G
 from gpevo.FunctionFolder.Submission.checkStatusC import checkStatusC
 from gpevo.FunctionFolder.USPEX.src.Reading import Reading
+from gpevo.FunctionFolder.USPEX.src.residual_check import mark_fake_residual
 from gpevo.log_utils import console_print
 WriteIndividualOutput_310 = import_module(
     "gpevo.FunctionFolder.USPEX.310.WriteIndividualOutput_310"
@@ -117,6 +118,12 @@ def ReadJobs_310():
                 s.Folder = 0
                 console_print("Relaxation is done.")
                 _load_gp_metrics(s, ORG)
+                # Earliest point where the GP residual is available (submitted
+                # by submitJob, or restored from gp.csv for a restarted/CLI run).
+                # Mark a catastrophically large residual as failed before the
+                # row is written, so fitness/EI/ranking treat it as dead while
+                # OUTPUT.txt keeps a full audit trail.
+                mark_fake_residual(s, label=f"Structure{idx + 1} (id {s.Number})")
                 POP.DoneOrder[idx] = POP.bodyCount
                 try:
                     compute_structure_metrics(s, ORG)

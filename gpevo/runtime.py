@@ -19,6 +19,14 @@ from collections import defaultdict
 # so the cutoff is NOT scale-free and should be re-tuned for a new system.
 RESIDUAL_CUT = 10.0
 
+# Cutoff for rejecting a "fake low-energy" structure whose GP residual is
+# catastrophically large (e.g. collapsed / overlapping atoms, residual ~1e4).
+# Deliberately separate from RESIDUAL_CUT: normal structures sit at 0.3-3, so
+# this much looser value only catches extreme outliers and avoids false
+# positives.  Do NOT reuse/merge with RESIDUAL_CUT -- that one gates the OOD
+# density fallback, not rejection.
+FAKE_RESIDUAL_CUT = 100.0
+
 
 # ---------------------------------------------------------------------------
 # Struct helpers

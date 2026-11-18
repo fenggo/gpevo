@@ -13,6 +13,7 @@ from gpevo.FunctionFolder.USPEX.src.gp_ml import (
     gp_active_learning, gp_enabled,
     opt12_energy_reference, opt12_energy_weight, opt12_fitness,
 )
+from gpevo.FunctionFolder.USPEX.src.residual_check import mark_fake_residual
 from .use_gp_density import use_gp_density
 from .use_gp_energy import use_gp_energy
 
@@ -352,6 +353,13 @@ def CalcFitness_310():
         if enthalpy >= 9999:
             fitness[i] = 100000.0
             continue
+        # Catch fake low-energy structures even on the fitness path (restarted
+        # or CLI-evaluated individuals may not have gone through ReadJobs).
+        # Applies to every optType, notably optType 13 whose raw fitness IS the
+        # residual and would otherwise rank a collapsed structure first.
+        if mark_fake_residual(s, label=f"pop[{i}] id={getattr(s, 'Number', 0)}"):
+            fitness[i] = 100000.0
+            continue
         if ORG.optType == 1:
             factor = sum(map(int, s.numMols)) / max(1, sum(map(int, ORG.numMols)))
             if factor <= 0:
@@ -470,9 +478,12 @@ def CalcFitness_310():
         ORG.opt_sign = 1
     fitness = ORG.opt_sign * fitness
 
-    # Numerical stabilization: keep failed structures at 100000
+    # Numerical stabilization: keep failed structures at 100000.  The explicit
+    # fake flag guards against opt_sign=-1 flipping the 100000 to -100000
+    # (which would otherwise rank a fake structure first in a maximization run).
     for i, s in enumerate(POP.POPULATION):
-        if float(np.asarray(s.Enthalpies)[-1]) > 99999:
+        if (float(np.asarray(s.Enthalpies)[-1]) > 99999
+                or getattr(s, "fakeResidualCheck", False)):
             fitness[i] = 100000.0
         if POP.generation > 1 and ORG.optType == 12 and np.isfinite(fitness[i]):
             pass  # original tolerance logic omitted in minimal port
