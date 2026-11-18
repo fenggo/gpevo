@@ -634,9 +634,12 @@ def sync_ffield_json(ORG):
     features were computed with; ``Specific/ffield.json`` is the one the search
     actually uses.  If they differ semantically (JSON content, ignoring key
     order and whitespace) the Specific copy is backed up to ``ffield.json.bak``
-    and replaced with the data copy.  A failure is logged to the terminal only
-    and never aborts the run.  Returns one of ``"disabled"``, ``"no-data"``,
-    ``"no-specific"``, ``"equal"``, ``"synced"``, ``"error"``.
+    and replaced with the data copy.  The new Specific copy is then converted
+    to ``Specific/reaxff_nn.lib`` via ``uspexkit.lib()`` so both consumers use
+    the same force field.  A failure is logged to the terminal only and never
+    aborts the run.  Returns one of ``"disabled"``, ``"no-data"``,
+    ``"no-specific"``, ``"equal"``, ``"synced"``, ``"synced-lib-error"``,
+    ``"error"``.
     """
     if not gp_enabled(ORG):
         return "disabled"
@@ -674,6 +677,18 @@ def sync_ffield_json(ORG):
     console_print(f"  GP ffield sync: Specific/ffield.json differed from "
                   f"{os.path.basename(data_dir)}/ffield.json; backed up old copy "
                   f"to ffield.json.bak and copied the data version")
+
+    # Keep the derived ReaxFF lib in step with the force field just installed.
+    # lib() is imported lazily (heavy deps) and wrapped: a conversion failure
+    # must not abort startup, the JSON copy is already in place.
+    try:
+        from gpevo.uspexkit.core import lib as write_reaxff_lib
+        write_reaxff_lib(jsonfile=dst,
+                         libfile=os.path.join(specific_dir, "reaxff_nn.lib"))
+    except Exception as exc:
+        console_print(f"  GP ffield sync: could not convert ffield.json to "
+                      f"reaxff_nn.lib ({exc}); start-up continues")
+        return "synced-lib-error"
     return "synced"
 
 
