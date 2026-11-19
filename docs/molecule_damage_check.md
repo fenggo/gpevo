@@ -87,8 +87,10 @@ degradeSimilar 的相似结构惩罚，gpevo/FunctionFolder/sys/degradeSimilar.p
 的偏差未必超过 0.6 Å 容忍）。上面的建议 1–4 若实现，能补上这类几何漏洞；但在此之前的兜底
 是**模型级残差筛查**，不改分子检查本身：
 
-- 新常量 `FAKE_RESIDUAL_CUT = 100.0`（runtime.py），与 `RESIDUAL_CUT = 10.0` **严格独立**——
-  后者是 OOD 密度回退的阈值，正常结构残差 0.3–3，100 只抓 12657 这类极端外推，避免误杀。
+- 阈值 `FAKE_RESIDUAL_CUT = 100.0`（runtime.py，可由 INPUT `fakerescut` 覆盖，存为
+  `ORG.fakeResCut`），与 `RESIDUAL_CUT = 10.0` **严格独立**——后者是 OOD 密度回退的阈值，
+  正常结构残差 0.3–3，100 只抓 12657 这类极端外推，避免误杀。判定函数从 ORG 读阈值，
+  INPUT 未设置时回退到默认值 100；重启时按 `_refresh_input_options` 重读 INPUT。
 - 两处插入点共用 `src/residual_check.py` 的 `is_fake_residual` / `mark_fake_residual`：
   (1) `ReadJobs_310.py` 在 `_load_gp_metrics` 之后（残差可用的最早时刻）、写 OUTPUT 之前；
   (2) `CalcFitness_310.py` 在循环开头（覆盖重启/CLI 路径及所有 optType）。

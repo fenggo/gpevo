@@ -215,3 +215,78 @@ def test_fake_excluded_from_gp_active_learning(monkeypatch):
 
     assert seen["fitness"][0] == 100000.0
     assert seen["fitness"][1] < 100000.0
+
+
+# --------------------------------------------------------------------------
+# INPUT.txt `fakerescut` option
+# --------------------------------------------------------------------------
+
+def test_default_cutoff_from_org(monkeypatch):
+    from gpevo.FunctionFolder.USPEX.src.createORGDefault import createORGDefault
+
+    org = createORGDefault()
+    assert org.fakeResCut == 100.0
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    assert is_fake_residual(struct(residual=12657.0)) is True
+    assert is_fake_residual(struct(residual=50.0)) is False
+
+
+@pytest.mark.parametrize("value", [-1.0, 0.0, float("nan"), "abc", None])
+def test_invalid_org_cutoff_falls_back_to_constant(monkeypatch, value):
+    org = struct(fakeResCut=value)
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    assert is_fake_residual(struct(residual=50.0)) is False
+    assert is_fake_residual(struct(residual=12657.0)) is True
+
+
+def test_org_cutoff_overrides_constant(monkeypatch):
+    org = struct(fakeResCut=50.0)
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    assert is_fake_residual(struct(residual=60.0)) is True
+    assert is_fake_residual(struct(residual=40.0)) is False
+    # explicit cutoff wins over the ORG value
+    assert is_fake_residual(struct(residual=60.0), cutoff=100.0) is False
+
+
+def test_explicit_org_argument_wins_over_global(monkeypatch):
+    monkeypatch.setitem(G, "ORG_STRUC", struct(fakeResCut=100.0))
+    org = struct(fakeResCut=30.0)
+    assert is_fake_residual(struct(residual=50.0), ORG=org) is True
+    assert is_fake_residual(struct(residual=50.0)) is False
+
+
+def test_calcfitness_honours_custom_cutoff(monkeypatch):
+    org = _org(opt_type=1)
+    org.fakeResCut = 50.0
+    pop = _pop(fake_residual=60.0, normal_residual=40.0)
+    monkeypatch.setitem(G, "ORG_STRUC", org)
+    monkeypatch.setitem(G, "POP_STRUC", pop)
+
+    out = CalcFitness_310()
+
+    assert out[0] == 100000.0
+    assert out[1] < 100000.0
+
+
+def test_input_fakerescut_parsing(tmp_path, monkeypatch):
+    from gpevo.FunctionFolder.USPEX.src.createORGDefault import createORGDefault
+    from gpevo.FunctionFolder.USPEX.src.createORG_AbinitCode import \
+        createORG_AbinitCode
+
+    (tmp_path / "INPUT.txt").write_text("50 : fakerescut\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    G["ORG_STRUC"] = createORGDefault()
+    createORG_AbinitCode("INPUT.txt")
+    assert G["ORG_STRUC"].fakeResCut == 50.0
+
+
+def test_input_without_fakerescut_keeps_default(tmp_path, monkeypatch):
+    from gpevo.FunctionFolder.USPEX.src.createORGDefault import createORGDefault
+    from gpevo.FunctionFolder.USPEX.src.createORG_AbinitCode import \
+        createORG_AbinitCode
+
+    (tmp_path / "INPUT.txt").write_text("1 : gp\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    G["ORG_STRUC"] = createORGDefault()
+    createORG_AbinitCode("INPUT.txt")
+    assert G["ORG_STRUC"].fakeResCut == 100.0

@@ -357,7 +357,8 @@ def CalcFitness_310():
         # or CLI-evaluated individuals may not have gone through ReadJobs).
         # Applies to every optType, notably optType 13 whose raw fitness IS the
         # residual and would otherwise rank a collapsed structure first.
-        if mark_fake_residual(s, label=f"pop[{i}] id={getattr(s, 'Number', 0)}"):
+        if mark_fake_residual(s, label=f"pop[{i}] id={getattr(s, 'Number', 0)}",
+                              ORG=ORG):
             fitness[i] = 100000.0
             continue
         if ORG.optType == 1:

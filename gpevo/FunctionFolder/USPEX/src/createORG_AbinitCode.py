@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import glob
+import math
 import os
 import shutil
 
@@ -15,7 +16,7 @@ from gpevo.FunctionFolder.USPEX.src.gp_ml import csv_rows
 # Options of the GP block; `gp` is the switch, the rest only matter when it is on.
 _GP_OPTIONS = ("gp", "ncpu", "data", "den", "u", "k", "mode", "nboot",
                "cache", "explore", "gpbackend", "gpiter", "gplr", "gpplot",
-               "f", "feature")
+               "f", "feature", "fakerescut")
 
 
 def _nonempty_block(lines):
@@ -293,6 +294,16 @@ def createORG_AbinitCode(inputFile):
     if raw is not None:
         try:
             ORG.gpERef12 = float(raw)
+        except ValueError:
+            pass
+    # Cutoff for rejecting fake low-energy structures by GP residual.  The
+    # default comes from createORGDefault; an invalid value keeps it.
+    raw = p.option("fakerescut")
+    if raw is not None:
+        try:
+            value = float(raw)
+            if math.isfinite(value) and value > 0:
+                ORG.fakeResCut = value
         except ValueError:
             pass
 

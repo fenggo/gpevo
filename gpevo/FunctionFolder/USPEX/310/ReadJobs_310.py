@@ -123,7 +123,8 @@ def ReadJobs_310():
                 # Mark a catastrophically large residual as failed before the
                 # row is written, so fitness/EI/ranking treat it as dead while
                 # OUTPUT.txt keeps a full audit trail.
-                mark_fake_residual(s, label=f"Structure{idx + 1} (id {s.Number})")
+                mark_fake_residual(s, label=f"Structure{idx + 1} (id {s.Number})",
+                                   ORG=ORG)
                 POP.DoneOrder[idx] = POP.bodyCount
                 try:
                     compute_structure_metrics(s, ORG)

@@ -143,7 +143,17 @@ sklearn   : gpbackend     % GP training backend: sklearn (default) | gpytorch (o
 0.1       : gplr          % L-BFGS learning rate (gpytorch only)
 0.6       : w12           % optType 12 + gp: weight on (GP energy - eref12)/factor
 -28081    : eref12        % optType 12 energy baseline (default: median etot of <data>/feature.csv)
+100       : fakerescut    % reject a fake low-energy structure when its GP residual exceeds this (default 100)
 ```
+
+`fakerescut` is the cutoff for the model-level fake-structure screen (see
+[`docs/molecule_damage_check.md`](docs/molecule_damage_check.md)): a structure
+whose GP residual (squared distance to the training set) exceeds it is marked
+as failed (`Enthalpies = 100000`) at job read-back and fitness evaluation, so it
+is excluded from ranking and best-structure selection but stays in OUTPUT.txt
+for audit. The default 100 is deliberately far above the OOD cutoff
+`RESIDUAL_CUT=10` and the normal residual range 0.3–3; raising it disables the
+screen in practice, lowering it risks false positives.
 
 `gpbackend` / `gpiter` / `gplr` select the opt-in GPyTorch training backend (`pip install gpevo[gpytorch]`). With the default `sklearn` backend nothing changes. GPyTorch is a **different model** (LinearKernel / RBFKernel parameterisation, L-BFGS on the exact marginal log likelihood, GaussianLikelihood noise), so its OUTPUT.txt values are not byte-for-byte comparable with the sklearn/MATLAB parity run, and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and no longer needs an external uspexkit install.
 

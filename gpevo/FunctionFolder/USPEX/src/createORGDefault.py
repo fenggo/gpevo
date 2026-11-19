@@ -4,7 +4,9 @@ from __future__ import annotations
 import math
 import os
 
-from gpevo.runtime import G, home_path, package_root, struct
+from gpevo.runtime import (
+    G, FAKE_RESIDUAL_CUT, home_path, package_root, struct,
+)
 
 
 def createORGDefault():
@@ -74,6 +76,9 @@ def createORGDefault():
     # optional fixed baseline.  None = median etot of <data>/feature.csv.
     ORG.gpW12 = 0.6
     ORG.gpERef12 = None
+    # Fake low-energy rejection: GP residual above this cutoff marks a
+    # structure as failed.  INPUT `fakerescut` overrides the default.
+    ORG.fakeResCut = FAKE_RESIDUAL_CUT
     ORG.gpPlot = 0              # opt-in with `1 : gpplot` for gp_gen<N>.png
     ORG.opt_sign = 1
     ORG.dimension = 3
