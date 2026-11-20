@@ -353,7 +353,17 @@ gpevo clean -p DIR  # 清理别的目录（不是当前目录）
 gpevo clean -f      # 目录里没有 INPUT.txt / CalcFold 也照样清
 gpevo ei-report     # 逐代密度演化 + EI 收敛性（见下）
 gpevo ei-report -p DIR --out PREFIX --trials 300
+gpevo gpt --n 5     # 留出 5 个晶体，输出 GP 与 DFT 密度/能量对比（见下）
+gpevo gpt -p DIR --n 5
 ```
+
+### `gpevo gpt`
+
+一个 **GP 测试**命令：与 `ei-report`（只读已落盘日志）不同，`gpt` 会**重新训练**模型，给出诚实的样本外评分。数据目录取自 INPUT.txt 的 `data` 选项（默认 `data`）。它从 `<data>/structures.traj` 中随机抽取 `--n` 个晶体，把这些行剔除后重新拟合 `StandardScaler` 和两个高斯过程，再对留出的晶体做预测。
+
+**不跑任何 DFT / GULP / MLP 计算**：DFT 密度和能量直接读 `feature.csv`，抽样晶体的 10 维特征就是 `feature_mlp.csv` 的第 `i` 行（对应 `structures_mlp.traj` 里 MLP 弛豫几何的特征）。要求 trajectory 与两个 CSV 的第 `i` 行对应同一个晶体；目前只校验行数和列数。
+
+终端表格逐行给出每个抽样晶体的 DFT 密度/能量、GP 预测的密度/能量及其后验标准差 `sd`（95% 半宽 ≈ `1.96 × sd`），表尾是留出集上的密度/能量 RMSE 与 MAE。重训在临时工作目录中进行，不会在运行目录留下 `gpr_*.pkl` 或 `gpcsp.log`。
 
 ### `gpevo ei-report`
 
@@ -367,7 +377,7 @@ gpevo ei-report -p DIR --out PREFIX --trials 300
 
 真实运行上它直接回答"EI 到底有没有用"：某个 TNT·CL-20 运行（14 代、690 结构、26 个标签）上，EI 第 1 个标签就到 1.918、第 4 个到 1.94，随机基线要到第 ~8 个标签才追平，最终 1.9470 对随机的 90 分位 1.9460。
 
-`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings`、`ei.log` 这些状态文件（`ei.log` 是追加写的，留着会把两轮运行选中的晶体混在一个文件里，`gpevo ei-report` 也会一起画进去）。
+`gpevo clean` 删的是新一轮不该继承的东西：`AntiSeeds/`、`CalcFold*`（全部，不只是 `CalcFold1`）、`results*/<ID>/`（打标签留下的单结构目录）、`*.pkl` / `*.mat` / `*.backup`，以及 `still_running`、`USPEX_IS_DONE`、`octave-workspace`、`Warnings`、`ei.log` 这些状态文件（`ei.log` 是追加写的，留着会把两轮运行选中的晶体混在一个文件里，`gpevo ei-report` 也会一起画进去）。它还会删掉根目录里最后结构的暂存文件 `POSCAR` 和 `POSCAR_order`：每个算完的结构都已追加到 `results<N>/gatheredPOSCARS[_order]`，根目录副本是冗余的（MATLAB 的 `Start.m` 在跑完时就会删它们）。`Seeds/POSCAR`、`POSCAR_SUBSTRATE` 和 `results<N>/` 里的汇总文件都不动。
 
 永远不删：`Specific/`、`Seeds/`、`INPUT.txt`、`MOL_*`、`results*/`（除 `-a`）、GP 训练数据目录 `<data>/`。目录里既没有 `INPUT.txt` 也没有 `CalcFold*` 时会拒绝执行，确认无误再加 `-f`。
 

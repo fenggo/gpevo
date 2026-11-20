@@ -91,6 +91,16 @@ def _build_parser():
     parser_pred.add_argument("--c", type=str, default="nn",
                              help="calculator to use: nn, mtp")
 
+    parser_gpt = subparsers.add_parser(
+        "gpt",
+        help="hold out crystals and compare GP vs DFT density/energy (GP test)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_gpt.add_argument("-p", "--path", default=".",
+                            help="run directory containing INPUT.txt")
+    parser_gpt.add_argument("--n", type=int, default=5,
+                            help="number of crystals to sample from structures.traj")
+
     parser_calc = subparsers.add_parser(
         "calc",
         help="run reference calculations for selected crystals",
@@ -336,6 +346,10 @@ def main(argv=None):
         pred(t=args.t, g=args.g, gen=args.gen, f=args.f, den=args.den,
              ids=args.ids, x=args.x, c=args.c, step=args.step,
              ncpu=args.ncpu, dat=args.data, tolerance=args.tolerance)
+        return
+    if args.command == "gpt":
+        from gpevo.tools.gpt import gpt
+        gpt(path=args.path, n=args.n)
         return
     if args.command == "calc":
         from gpevo.uspexkit.core import calc

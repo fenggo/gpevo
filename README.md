@@ -365,7 +365,29 @@ gpevo clean -p DIR  # clean a different directory (not the current one)
 gpevo clean -f      # clean even without INPUT.txt / CalcFold in the directory
 gpevo ei-report     # per-generation density evolution + EI convergence (see below)
 gpevo ei-report -p DIR --out PREFIX --trials 300
+gpevo gpt --n 5     # hold out 5 crystals: GP vs DFT density/energy report (see below)
+gpevo gpt -p DIR --n 5
 ```
+
+### `gpevo gpt`
+
+A **GP test**: unlike `ei-report` (which only reads already-written logs), `gpt`
+**refits** the models to give an honest out-of-sample score. The data directory
+comes from INPUT.txt's `data` option (default `data`). It samples `--n` frames
+from `<data>/structures.traj`, drops those rows, refits `StandardScaler` and
+both Gaussian processes on the remaining rows, then predicts the held-out ones.
+
+No DFT / GULP / MLP calculation is run: DFT density and energy are read from
+`feature.csv`, and the 10-D feature vector of each sampled crystal is row `i`
+of `feature_mlp.csv` (the features of the MLP-relaxed geometry in
+`structures_mlp.traj`). Row `i` of the trajectory and both CSVs must describe the
+same crystal; only counts and widths are validated.
+
+The terminal table lists, per sampled crystal, DFT density/energy, GP predicted
+density/energy and their posterior standard deviations `sd` (95% half-width
+≈ `1.96 × sd`), followed by density/energy RMSE and MAE over the holdout. A
+temporary working directory is used for the refit, so no `gpr_*.pkl` or
+`gpcsp.log` is written into the run directory.
 
 ### `gpevo ei-report`
 
