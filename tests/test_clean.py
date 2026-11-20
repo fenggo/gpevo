@@ -46,6 +46,9 @@ def run_dir(tmp_path):
     _touch(os.path.join(root, "USPEX_IS_DONE"))
     _touch(os.path.join(root, "Warnings"))
     _touch(os.path.join(root, "ei.log"), "gen 2:117 177\ngen 3:201 218\n")
+    # last-structure staging copies; the real blocks live in results1 below
+    _touch(os.path.join(root, "POSCAR"), "EA3 ...\n")
+    _touch(os.path.join(root, "POSCAR_order"), "EA3 ...\n")
     # the DFT uspexkit.calc ran for the labelled structures: part of the run's
     # record now, so a plain clean keeps it and only --all drops it
     _touch(os.path.join(root, "results1", "7", "siesta.out"))
@@ -62,7 +65,8 @@ def test_clean_removes_scratch_and_keeps_assets(run_dir, capsys):
 
     for gone in ("CalcFold1", "CalcFoldTemp", "AntiSeeds", "Current_ORG.pkl",
                  "Current_POP.pkl", "leftover.mat", "old.backup",
-                 "still_running", "USPEX_IS_DONE", "Warnings", "ei.log"):
+                 "still_running", "USPEX_IS_DONE", "Warnings", "ei.log",
+                 "POSCAR", "POSCAR_order"):
         assert not _exists(run_dir, gone), gone
     for kept in ("INPUT.txt", "MOL_1", "Specific", "Seeds", "data", "results1"):
         assert _exists(run_dir, kept), kept
@@ -71,6 +75,26 @@ def test_clean_removes_scratch_and_keeps_assets(run_dir, capsys):
     assert _exists(run_dir, "results1", "generation1", "POP_STRUC.pkl")
     assert _exists(run_dir, "results1", "AuxiliaryFiles", "keep.txt")
     assert "removed" in capsys.readouterr().out
+
+
+def test_clean_removes_only_root_staging_poscars(run_dir):
+    """The gathers and substrate/seeds are the real record and must survive."""
+    _touch(os.path.join(run_dir, "results1", "gatheredPOSCARS"), "EA3 ...\n")
+    _touch(os.path.join(run_dir, "results1", "gatheredPOSCARS_order"), "EA3 ...\n")
+    _touch(os.path.join(run_dir, "POSCAR_SUBSTRATE"))
+
+    clean(path=run_dir, dry_run=True)
+    assert _exists(run_dir, "POSCAR")
+    assert _exists(run_dir, "POSCAR_order")
+
+    clean(path=run_dir)
+
+    assert not _exists(run_dir, "POSCAR")
+    assert not _exists(run_dir, "POSCAR_order")
+    assert _exists(run_dir, "results1", "gatheredPOSCARS")
+    assert _exists(run_dir, "results1", "gatheredPOSCARS_order")
+    assert _exists(run_dir, "Seeds", "POSCAR")
+    assert _exists(run_dir, "POSCAR_SUBSTRATE")
 
 
 def test_clean_keeps_the_dft_folders_of_the_labelled_structures(run_dir):

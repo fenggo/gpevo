@@ -14,7 +14,13 @@ Rules, in one place instead of three slightly different copies:
   the ``ei.log`` of the GP selection -- it is appended to, so a new run would
   otherwise report the crystals an earlier one labelled.  Current runs write
   that log into their own ``results<N>/``; only the home-directory copy of a
-  run finished before that move is left to remove.
+  run finished before that move is left to remove.  Also the last-structure
+  staging files ``POSCAR`` / ``POSCAR_order``: every finished structure is
+  appended to ``results<N>/gatheredPOSCARS[_order]``, so these root-level
+  copies are redundant.  MATLAB's ``Start.m`` removes them at the end of a run;
+  gpevo leaves them behind without this cleanup.  Only the two root-level
+  files are touched -- ``Seeds/POSCAR``, ``POSCAR_SUBSTRATE`` and the
+  ``results<N>/`` gathers are assets and survive.
 
 The per-structure ``results*/<ID>`` folders -- what ``uspexkit.calc`` writes
 when it labels a structure -- are **kept**: they are the DFT record of that
@@ -32,13 +38,17 @@ import glob
 import os
 import shutil
 
+# Root-level staging copies of the last structure written; the real record is
+# results<N>/gatheredPOSCARS[_order], which clean never touches.
+_STAGING_FILES = ("POSCAR", "POSCAR_order")
+
 # Deleted by a plain `gpevo clean`.
 # ``ei.log`` is appended to by every generation that labels something, so it
 # belongs with the other per-run state: leaving it behind mixes the selections
 # of two runs in one file.  It is written to ``results<N>/`` nowadays, so this
 # only picks up the home-directory copy an older run left behind.
 _STATE_FILES = ("still_running", "USPEX_IS_DONE", "octave-workspace", "Warnings",
-                "ei.log")
+                "ei.log") + _STAGING_FILES
 _FILE_PATTERNS = ("*.pkl", "*.mat", "*.backup")
 _DIR_PATTERNS = ("AntiSeeds", "CalcFold*")
 
