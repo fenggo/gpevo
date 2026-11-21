@@ -132,12 +132,139 @@ def format_report(records, n_total, n_sampled, data_dir, options=None):
     return "\n".join(lines)
 
 
-def gpt(path=".", n=5, seed=0):
+def _parity_metrics(y_pred, y_true):
+    """MAE, RMSE and R^2 of a parity plot."""
+    resid = y_pred - y_true
+    mae = np.mean(np.abs(resid))
+    rmse = np.sqrt(np.mean(resid ** 2))
+    ss_res = np.sum(resid ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return mae, rmse, r2
+
+
+def _linear_fit(x, y):
+    A = np.vstack([x, np.ones_like(x)]).T
+    return np.linalg.lstsq(A, y, rcond=None)[0]
+
+
+def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
+                        pad_frac, decimals):
+    """One publication-quality parity scatter with GP uncertainty bars."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import AutoMinorLocator
+
+    style = {
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "DejaVu Serif"],
+        "font.size": 11, "axes.labelsize": 13, "axes.titlesize": 13,
+        "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 9.5,
+        "figure.dpi": 300, "savefig.dpi": 300,
+        "savefig.bbox": "tight", "savefig.pad_inches": 0.05,
+        "lines.linewidth": 1.2, "lines.markersize": 5.5,
+        "axes.linewidth": 1.0,
+        "xtick.major.width": 0.8, "ytick.major.width": 0.8,
+        "xtick.major.size": 4, "ytick.major.size": 4,
+        "xtick.direction": "in", "ytick.direction": "in",
+    }
+    blue, dark, orange = "#0072B2", "#333333", "#D55E00"
+
+    with plt.rc_context(style):
+        fig, ax = plt.subplots(figsize=(5.0, 5.0))
+        ax.errorbar(x, y, yerr=1.96 * sigma, fmt="none", ecolor=blue,
+                    elinewidth=0.4, capsize=0, alpha=0.20, zorder=1)
+        ax.scatter(x, y, c=blue, s=30, edgecolors="white", linewidths=0.3,
+                   alpha=0.85, zorder=3)
+
+        all_xy = np.concatenate([x, y])
+        lims = [all_xy.min(), all_xy.max()]
+        pad = (lims[1] - lims[0]) * pad_frac
+        lims = [lims[0] - pad, lims[1] + pad]
+        ax.plot(lims, lims, color=dark, linestyle="--", linewidth=0.9,
+                alpha=0.6, zorder=2, label="y = x")
+
+        slope, intercept = _linear_fit(x, y)
+        x_fit = np.linspace(lims[0], lims[1], 100)
+        ax.plot(x_fit, slope * x_fit + intercept, color=orange,
+                linestyle="-", linewidth=1.0, alpha=0.8, zorder=2,
+                label=f"Linear fit (slope = {slope:.3f})")
+
+        mae, rmse, r2 = _parity_metrics(y, x)
+        f = f".{decimals}f"
+        textstr = (r"$\mathrm{MAE}$" + f" = {mae:{f}} {unit}\n"
+                   r"$\mathrm{RMSE}$" + f" = {rmse:{f}} {unit}\n"
+                   r"$R^2$" + f" = {r2:.4f}")
+        props = dict(boxstyle="round,pad=0.4", facecolor="white",
+                     edgecolor="#999999", alpha=0.92, linewidth=0.8)
+        ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=9,
+                verticalalignment="top", bbox=props)
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_xlim(lims)
+        ax.set_ylim(lims)
+        ax.set_aspect("equal")
+        ax.legend(loc="lower right", frameon=True, fancybox=False,
+                  edgecolor="#333333", framealpha=0.9)
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.grid(True, linestyle=":", alpha=0.35, linewidth=0.4)
+
+        fig.tight_layout()
+        fig.savefig(outpath, transparent=True)
+        plt.close(fig)
+    return mae, rmse, r2, slope
+
+
+def _save_parity_plots(records, outdir="."):
+    """Write test_gp_energy.svg and test_gp_density.svg from holdout records."""
+    e_dft = np.array([r["dft_energy"] for r in records])
+    e_gp = np.array([r["gp_energy"] for r in records])
+    u_e = np.array([r["gp_energy_sigma"] for r in records])
+    e_dft_rel = e_dft - e_dft.min()
+    e_gp_rel = e_gp - e_gp.min()
+
+    d_dft = np.array([r["dft_density"] for r in records])
+    d_gp = np.array([r["gp_density"] for r in records])
+    u_d = np.array([r["gp_density_sigma"] for r in records])
+
+    energy_path = os.path.join(outdir, "test_gp_energy.svg")
+    density_path = os.path.join(outdir, "test_gp_density.svg")
+
+    mae_e, rmse_e, r2_e, slope_e = _save_parity_figure(
+        e_dft_rel, e_gp_rel, u_e,
+        "DFT relative energy (eV)",
+        "GP-predicted relative energy (eV)",
+        "eV", energy_path, 0.08, 3)
+    mae_d, rmse_d, r2_d, slope_d = _save_parity_figure(
+        d_dft, d_gp, u_d,
+        r"DFT density (g/cm$^3$)",
+        r"GP-predicted density (g/cm$^3$)",
+        "g/cm³", density_path, 0.15, 4)
+
+    print("═" * 60)
+    print("Energy parity — relative energies (E − E_min)")
+    print(f"  MAE: {mae_e:.4f} eV,  RMSE: {rmse_e:.4f} eV, "
+          f"R²: {r2_e:.4f},  slope: {slope_e:.4f}")
+    print("─" * 60)
+    print("Density parity")
+    print(f"  MAE: {mae_d:.4f} g/cm³, RMSE: {rmse_d:.4f} g/cm³, "
+          f"R²: {r2_d:.4f},  slope: {slope_d:.4f}")
+    print("═" * 60)
+    print(f"Saved: {energy_path}, {density_path}")
+    return energy_path, density_path
+
+
+def gpt(path=".", n=5, seed=0, plot=True):
     """Refit the GP without ``n`` sampled crystals and report their predictions.
 
     Returns one record per sampled crystal (see ``format_report`` for the
     printed columns).  ``seed`` keeps sampling reproducible; it is not exposed
     as a CLI option.  The GP backend / training options come from INPUT.txt.
+    With ``plot=True`` also writes ``test_gp_energy.svg`` and
+    ``test_gp_density.svg`` (DFT vs GP parity scatters with GP uncertainty).
     """
     if not isinstance(n, (int, np.integer)) or n <= 0:
         raise RuntimeError("--n must be a positive integer")
@@ -232,6 +359,8 @@ def gpt(path=".", n=5, seed=0):
         })
 
     print(format_report(records, n_rows, n, data_dir, options))
+    if plot:
+        _save_parity_plots(records, outdir=os.getcwd())
     return records
 
 

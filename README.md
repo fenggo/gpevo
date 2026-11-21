@@ -392,7 +392,11 @@ The terminal table lists, per sampled crystal, DFT density/energy, GP predicted
 density/energy and their posterior standard deviations `sd` (95% half-width
 ≈ `1.96 × sd`), followed by density/energy RMSE and MAE over the holdout. A
 temporary working directory is used for the refit, so no `gpr_*.pkl` or
-`gpcsp.log` is written into the run directory.
+`gpcsp.log` is written into the run directory. It also writes two parity
+scatters (DFT vs GP prediction, with the GP 1.96*sd error bars, linear fit and
+MAE/RMSE/R²) into the current directory: `test_gp_energy.svg` (energies shifted
+to E − E_min) and `test_gp_density.svg`. Python API callers can pass `plot=False`
+to skip the figures.
 
 ### `gpevo ei-report`
 

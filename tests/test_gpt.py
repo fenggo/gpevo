@@ -82,7 +82,7 @@ def test_gpt_returns_holdout_records_and_report(run_dir, monkeypatch, capsys):
     root, _data, _mlp, dft = run_dir
     captured = _stub_loader(monkeypatch, gpt_module, {})
 
-    records = gpt_module.gpt(path=root, n=3, seed=0)
+    records = gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
     assert len(records) == 3
     assert set(records[0]) == {
@@ -109,9 +109,9 @@ def test_gpt_sampling_is_seed_controlled(run_dir, monkeypatch):
     root, _data, _mlp, _dft = run_dir
     _stub_loader(monkeypatch, gpt_module, {})
 
-    a = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=7)]
-    b = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=7)]
-    c = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=9)]
+    a = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=7, plot=False)]
+    b = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=7, plot=False)]
+    c = [r["row"] for r in gpt_module.gpt(path=root, n=3, seed=9, plot=False)]
     assert a == b
     assert a != c
 
@@ -122,7 +122,7 @@ def test_gpt_refits_without_heldout_rows(run_dir, monkeypatch):
     root, data, _mlp, dft = run_dir
     captured = _stub_loader(monkeypatch, gpt_module, {})
 
-    records = gpt_module.gpt(path=root, n=3, seed=0)
+    records = gpt_module.gpt(path=root, n=3, seed=0, plot=False)
     idx = [r["row"] for r in records]
     mask = np.ones(_N_ROWS, dtype=bool)
     mask[idx] = False
@@ -144,7 +144,7 @@ def test_gpt_forwards_default_gp_options(run_dir, monkeypatch):
     root, _data, _mlp, _dft = run_dir
     captured = _stub_loader(monkeypatch, gpt_module, {})
 
-    gpt_module.gpt(path=root, n=3, seed=0)
+    gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
     assert captured["options"] == {
         "backend": "sklearn", "training_iter": 200, "learning_rate": 0.1}
@@ -161,7 +161,7 @@ def test_gpt_honours_gpbackend_from_input(run_dir, monkeypatch, capsys):
     monkeypatch.setattr(gpt_module, "_gpytorch_is_installed", lambda: True)
     captured = _stub_loader(monkeypatch, gpt_module, {})
 
-    gpt_module.gpt(path=root, n=3, seed=0)
+    gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
     assert captured["options"] == {
         "backend": "gpytorch", "training_iter": 50, "learning_rate": 0.05}
@@ -180,7 +180,7 @@ def test_gpt_rejects_missing_gpytorch_backend(run_dir, monkeypatch):
     _stub_loader(monkeypatch, gpt_module, {})
 
     with pytest.raises(RuntimeError, match="gpytorch is not installed"):
-        gpt_module.gpt(path=root, n=3, seed=0)
+        gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
 
 def test_gpt_gpytorch_keeps_ambient_threads(run_dir, monkeypatch):
@@ -212,7 +212,7 @@ def test_gpt_gpytorch_keeps_ambient_threads(run_dir, monkeypatch):
     with threadpool_limits(limits=2):
         pinned = {(p.get("internal_api"), p.get("filepath"))
                   for p in threadpool_info() if p["num_threads"] == 2}
-        gpt_module.gpt(path=root, n=2, seed=0)
+        gpt_module.gpt(path=root, n=2, seed=0, plot=False)
 
     assert pinned, "no BLAS threadpool could be pinned to 2"
     assert seen["options"]["backend"] == "gpytorch"
@@ -228,7 +228,7 @@ def test_gpt_rejects_unknown_gpbackend(run_dir, monkeypatch):
     _stub_loader(monkeypatch, gpt_module, {})
 
     with pytest.raises(RuntimeError, match="unknown gpbackend"):
-        gpt_module.gpt(path=root, n=3, seed=0)
+        gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
 
 def test_gpt_does_not_pollute_run_directory(run_dir, monkeypatch):
@@ -237,7 +237,7 @@ def test_gpt_does_not_pollute_run_directory(run_dir, monkeypatch):
     cwd_before = os.getcwd()
     captured = _stub_loader(monkeypatch, gpt_module, {})
 
-    gpt_module.gpt(path=root, n=2, seed=0)
+    gpt_module.gpt(path=root, n=2, seed=0, plot=False)
 
     assert os.getcwd() == cwd_before
     assert captured["cwd"] != cwd_before
@@ -300,7 +300,7 @@ def test_gpt_validation_errors(run_dir, monkeypatch, mutation):
         _write_csv(os.path.join(data, "feature.csv"), np.zeros((_N_ROWS + 1, 10)))
 
     with pytest.raises(RuntimeError):
-        gpt_module.gpt(path=root, n=n, seed=0)
+        gpt_module.gpt(path=root, n=n, seed=0, plot=False)
 
 
 def test_gpt_real_fit_smoke(run_dir):
@@ -308,7 +308,7 @@ def test_gpt_real_fit_smoke(run_dir):
     from gpevo.tools.gpt import gpt as gpt_func
     root, _data, _mlp, _dft = run_dir
 
-    records = gpt_func(path=root, n=2, seed=0)
+    records = gpt_func(path=root, n=2, seed=0, plot=False)
 
     assert len(records) == 2
     for rec in records:
@@ -318,3 +318,20 @@ def test_gpt_real_fit_smoke(run_dir):
         assert rec["gp_energy_sigma"] >= 0
     for name in ("gpr_density.pkl", "gpr_energy.pkl", "gpcsp.log"):
         assert not os.path.exists(os.path.join(root, name)), name
+
+
+def test_gpt_writes_parity_plots(run_dir, monkeypatch, tmp_path, capsys):
+    """gpt() writes the energy/density parity SVGs into the cwd."""
+    pytest.importorskip("matplotlib")
+    from gpevo.tools import gpt as gpt_module
+    root, _data, _mlp, _dft = run_dir
+
+    monkeypatch.chdir(tmp_path)
+    gpt_module.gpt(path=root, n=3, seed=0, plot=True)
+
+    for name in ("test_gp_energy.svg", "test_gp_density.svg"):
+        p = tmp_path / name
+        assert p.exists() and p.stat().st_size > 0, name
+        assert p.read_bytes().lstrip().startswith(b"<?xml") or b"<svg" in p.read_bytes()[:200]
+    out = capsys.readouterr().out
+    assert "Energy parity" in out and "Density parity" in out

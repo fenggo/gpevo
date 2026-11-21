@@ -363,7 +363,7 @@ gpevo gpt -p DIR --n 5
 
 **不跑任何 DFT / GULP / MLP 计算**：DFT 密度和能量直接读 `feature.csv`，抽样晶体的 10 维特征就是 `feature_mlp.csv` 的第 `i` 行（对应 `structures_mlp.traj` 里 MLP 弛豫几何的特征）。要求 trajectory 与两个 CSV 的第 `i` 行对应同一个晶体；目前只校验行数和列数。
 
-终端表格逐行给出每个抽样晶体的 DFT 密度/能量、GP 预测的密度/能量及其后验标准差 `sd`（95% 半宽 ≈ `1.96 × sd`），表尾是留出集上的密度/能量 RMSE 与 MAE。重训在临时工作目录中进行，不会在运行目录留下 `gpr_*.pkl` 或 `gpcsp.log`。
+终端表格逐行给出每个抽样晶体的 DFT 密度/能量、GP 预测的密度/能量及其后验标准差 `sd`（95% 半宽 ≈ `1.96 × sd`），表尾是留出集上的密度/能量 RMSE 与 MAE。重训在临时工作目录中进行，不会在运行目录留下 `gpr_*.pkl` 或 `gpcsp.log`。此外还会在当前目录画出两张对比散点图（DFT vs GP 预测，带 GP 的 1.96×sd 误差棒、线性拟合与 MAE/RMSE/R²）：`test_gp_energy.svg`（能量平移到 E − E_min）和 `test_gp_density.svg`。通过 Python API 调用时可传 `plot=False` 跳过画图。
 
 ### `gpevo ei-report`
 
