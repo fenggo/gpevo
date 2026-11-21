@@ -19,6 +19,9 @@ dependencies = [
     "spglib>=2.0",
     # uspexkit (vendored under gpevo.uspexkit) runtime deps
     "scikit-learn>=1.0",
+    # imported directly in core.py/gpt.py to pin BLAS threads around GPR fit
+    # and predict (also a scikit-learn dependency, listed here explicitly)
+    "threadpoolctl>=2.0",
     "ase>=3.22",
     "irff",
     "pymatgen",

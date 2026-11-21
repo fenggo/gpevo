@@ -30,9 +30,10 @@ import tempfile
 import numpy as np
 from ase.io.trajectory import Trajectory
 from sklearn.preprocessing import StandardScaler
+from threadpoolctl import threadpool_limits
 
 from gpevo.inputparser import InputParser
-from gpevo.uspexkit.core import load_gaussian_process
+from gpevo.uspexkit.core import load_gaussian_process, _gp_predict
 
 
 def _resolve_data_dir(path):
@@ -153,13 +154,20 @@ def gpt(path=".", n=5, seed=0):
     with tempfile.TemporaryDirectory(prefix="gpevo_gpt_") as tmp:
         try:
             os.chdir(tmp)
-            gpr_energy, gpr_density = load_gaussian_process(
-                X_train, y[mask], y_eng[mask])
+            # Pin BLAS to one thread for the whole fit.  gpevo imports torch
+            # (via irff), which raises the thread count to the core count;
+            # multithreaded reductions make L-BFGS land in degenerate optima
+            # (sd == 0, predictions tens of units off).  core.py applies the
+            # same pin inside _load_or_fit_gpr; keep it here too so this
+            # held-out evaluation stays reproducible even if that changes.
+            with threadpool_limits(limits=1):
+                gpr_energy, gpr_density = load_gaussian_process(
+                    X_train, y[mask], y_eng[mask])
         finally:
             os.chdir(previous)
 
-    mu_d, sd_d = gpr_density.predict(X_query, return_std=True)
-    mu_e, sd_e = gpr_energy.predict(X_query, return_std=True)
+    mu_d, sd_d = _gp_predict(gpr_density, X_query)
+    mu_e, sd_e = _gp_predict(gpr_energy, X_query)
 
     records = []
     for row, dft_d, dft_e, gp_d, s_d, gp_e, s_e in zip(

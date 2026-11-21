@@ -27,6 +27,9 @@ class _FakeSklearnGPR:
     def fit(self, X, y):
         return self
 
+    def predict(self, X, return_std=False):
+        return np.zeros(len(X)), np.zeros(len(X))
+
 
 class _FakeGpytorchGPR:
     """Picklable stand-in without sklearn's Cholesky factor."""
@@ -172,9 +175,36 @@ def test_default_backend_still_uses_sklearn_tag(monkeypatch, tmp_path):
     core._load_or_fit_gpr("d.pkl", np.zeros((2, 2)), np.zeros(2), None)
     with open("d.pkl", "rb") as fp:
         blob = pickle.load(fp)
-    assert blob["version"] == core._KERNEL_VERSION == 2
+    assert blob["version"] == core._KERNEL_VERSION == 3
     assert isinstance(blob["model"], _FakeSklearnGPR)
     assert core._GPYTORCH_VERSION == "gpytorch-2"
+
+
+def test_gp_fit_and_predict_pin_blas_threads(monkeypatch, tmp_path):
+    """Regression: multithreaded BLAS produced a degenerate GP (sd==0).
+
+    gpevo imports torch/MKL, which raises the BLAS thread count to the core
+    count.  Both sklearn's L-BFGS fit and the Cholesky solve in predict then
+    become numerically unstable.  Guard both single-thread pins so nobody
+    removes them and silently reintroduces the bad `gpevo gpt` results.
+    """
+    seen = []
+    real_limits = core.threadpool_limits
+
+    def spy_limits(*args, **kwargs):
+        seen.append(kwargs.get("limits", args[0] if args else None))
+        return real_limits(*args, **kwargs)
+
+    monkeypatch.setattr(core, "threadpool_limits", spy_limits)
+    monkeypatch.setattr(core, "GaussianProcessRegressor", _FakeSklearnGPR)
+    monkeypatch.chdir(tmp_path)
+
+    core._load_or_fit_gpr("d.pkl", np.zeros((3, 2)), np.zeros(3), None)
+    assert seen == [1], "sklearn GPR fit must pin BLAS to one thread"
+
+    seen.clear()
+    core._gp_predict(_FakeSklearnGPR(), np.zeros((2, 2)))
+    assert seen == [1], "GP predict must pin BLAS to one thread"
 
 
 # ── cache isolation between backends ────────────────────────────────────

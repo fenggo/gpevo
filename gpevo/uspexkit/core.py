@@ -14,6 +14,7 @@ from sklearn.gaussian_process.kernels import (RBF,DotProduct, WhiteKernel,
                                               ExpSineSquared)
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
+from threadpoolctl import threadpool_limits
 # from ase import build
 from ase.io import read,write
 from ase.io.trajectory import Trajectory, TrajectoryWriter
@@ -244,8 +245,8 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                 '          uncertainty,           energy_min,       eng_pred,        uncertainty_eng,'
                 '      density_gp_updated,  uncertainty_updated',file=fd)
 
-    mean_prediction, std_prediction = gpr_density.predict(X_, return_std=True)
-    mean_eng_pred, std_eng_pred = gpr_energy.predict(X_, return_std=True)
+    mean_prediction, std_prediction = _gp_predict(gpr_density, X_)
+    mean_eng_pred, std_eng_pred = _gp_predict(gpr_energy, X_)
     density_rf = rfr_density.predict(X_)
     # print('95% confidence interval: \n', 1.96 * std_prediction)
     
@@ -349,7 +350,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                                    optimizer=None,
                                    normalize_y=True)
                                gpr_upd.fit(X_upd, y_upd)
-                               mu_upd, sd_upd = gpr_upd.predict(X_, return_std=True)
+                               mu_upd, sd_upd = _gp_predict(gpr_upd, X_)
                                density_updated = float(mu_upd[0])
                                uncert_updated = float(1.96 * sd_upd[0])
                            except Exception as _err:
@@ -588,10 +589,13 @@ def get_gulp_energy(atoms, ncpu=8,o=True):
 # models are cached in gpr_*.pkl, and without this stamp a cached model would
 # silently keep the old kernel (the old code required deleting the pkls by
 # hand -- see the commented-out "refit" logic this replaces).
-_KERNEL_VERSION = 2
-# Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag at 2
-# means switching backends always refits, without invalidating existing
-# sklearn caches.
+# v3: refit every cached model so pickles written by the multithreaded,
+# numerically unstable fit (degenerate kernel, sd==0, wild predictions) are
+# replaced by the single-thread fit.  The kernel spec itself is unchanged.
+_KERNEL_VERSION = 3
+# Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag on a
+# separate numbering scheme means switching backends always refits, without
+# invalidating existing sklearn caches.
 # v2: the likelihood noise constraint became an Interval (matching sklearn's
 # noise_level_bounds) and log_marginal_likelihood() now reports the TOTAL LML.
 # A v1 raw_noise tensor is not interchangeable with a v2 one, so old caches
@@ -622,10 +626,20 @@ def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
                                 normalize_y=True, random_state=0,
                                 training_iter=training_iter,
                                 learning_rate=learning_rate, core=core)
+        gpr.fit(X, y)
     else:
         gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10,
                                        normalize_y=True, random_state=0)
-    gpr.fit(X, y)
+        # Importing gpevo pulls in torch/MKL and raises the BLAS thread count
+        # to the core count.  Multithreaded reductions make L-BFGS land in
+        # different (often degenerate) hyperparameter optima -- length scales
+        # ~1e-4 and noise ~1e-8 give a near-singular kernel, sd==0 and
+        # predictions tens of eV/g/cm3 off.  Pin BLAS to one thread for the
+        # sklearn fit so gp(), pred() and gpevo gpt all get the same,
+        # well-conditioned model.  (GPyTorch uses its own optimiser; leave it
+        # alone rather than throttling an untested opt-in backend.)
+        with threadpool_limits(limits=1):
+            gpr.fit(X, y)
     with open(path, "wb") as f:
         pickle.dump({"version": version, "model": gpr}, f)
     return gpr
@@ -675,10 +689,28 @@ def _write_gp_diagnostics(fl, gpr, X, y, label, backend):
           file=fl)
 
 
+def _gp_predict(gpr, X, return_std=True):
+    """``gpr.predict`` with BLAS pinned to one thread.
+
+    The Cholesky solve inside sklearn's predict() is as numerically sensitive
+    as the fit: with 40 threads it can return slightly negative variances that
+    sklearn silently clamps to 0.  That kills the uncertainty fed to EI, so
+    keep the predict step single-threaded just like the sklearn fit.  The
+    GPyTorch backend uses its own Cholesky path; the pin is harmless there.
+    """
+    with threadpool_limits(limits=1):
+        return gpr.predict(X, return_std=return_std)
+
+
 def load_gaussian_process(X, y, y_eng, backend="sklearn",
                           training_iter=200, learning_rate=0.1,
                           log_dir=None):
     length_scale = [0.1 for i in range(X.shape[1])]
+    # NOTE: do not "tighten" these kernels by adding bounds.  The LML surface
+    # is multimodal, and restricting length scales / noise makes L-BFGS settle
+    # in a regime where sklearn's posterior variance goes slightly negative
+    # and is clamped to 0 -> sd==0, which breaks EI in gp().  Reproducibility
+    # comes from the single-thread fit in _load_or_fit_gpr, not from bounds.
     # density: Matern 5/2 + linear + noise.  LOO on the training set showed
     # this target is insensitive to the core (RBF is within noise), so the
     # original spec is kept.
@@ -876,8 +908,8 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
         res, imin, X_ = raw_residual(feature, D, scaler)
         res_ = float(res[imin])
 
-        density_pred, std_den_pred = gpr_density.predict(X_, return_std=True)
-        energy_pred, std_eng_pred = gpr_energy.predict(X_, return_std=True)
+        density_pred, std_den_pred = _gp_predict(gpr_density, X_)
+        energy_pred, std_eng_pred = _gp_predict(gpr_energy, X_)
         energy_pred  = energy_pred[0]
         density_pred = density_pred[0]
         std_den_pred = std_den_pred[0]
