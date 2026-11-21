@@ -102,6 +102,21 @@ def _build_parser():
     parser_gpt.add_argument("--n", type=int, default=5,
                             help="number of crystals to sample from structures.traj")
 
+    parser_rft = subparsers.add_parser(
+        "rft",
+        help="hold out crystals and compare RandomForest vs DFT density/energy "
+             "(RF test)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_rft.add_argument("-p", "--path", default=".",
+                            help="run directory containing INPUT.txt")
+    parser_rft.add_argument("--n", type=int, default=5,
+                            help="number of crystals to sample from structures.traj")
+    parser_rft.add_argument("--n-estimators", type=int, default=300,
+                            help="number of trees in each forest")
+    parser_rft.add_argument("--n-jobs", type=int, default=-1,
+                            help="parallel jobs for the forest fit (-1 = all cores)")
+
     parser_calc = subparsers.add_parser(
         "calc",
         help="run reference calculations for selected crystals",
@@ -351,6 +366,11 @@ def main(argv=None):
     if args.command == "gpt":
         from gpevo.tools.gpt import gpt
         gpt(path=args.path, n=args.n)
+        return
+    if args.command == "rft":
+        from gpevo.tools.rft import rft
+        rft(path=args.path, n=args.n,
+            n_estimators=args.n_estimators, n_jobs=args.n_jobs)
         return
     if args.command == "calc":
         from gpevo.uspexkit.core import calc

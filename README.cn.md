@@ -365,6 +365,12 @@ gpevo gpt -p DIR --n 5
 
 终端表格逐行给出每个抽样晶体的 DFT 密度/能量、GP 预测的密度/能量及其后验标准差 `sd`（95% 半宽 ≈ `1.96 × sd`），表尾是留出集上的密度/能量 RMSE 与 MAE。重训在临时工作目录中进行，不会在运行目录留下 `gpr_*.pkl` 或 `gpcsp.log`。此外还会在当前目录画出两张对比散点图（DFT vs GP 预测，带 GP 的 1.96×sd 误差棒、线性拟合与 MAE/RMSE/R²）：`test_gp_energy.svg`（能量平移到 E − E_min）和 `test_gp_density.svg`。通过 Python API 调用时可传 `plot=False` 跳过画图。
 
+### `gpevo rft`
+
+`gpt` 的随机森林版本：留出样本、特征、训练/查询划分和标准化**完全一致**，只是把两个高斯过程换成两个 `RandomForestRegressor`（300 棵树，`random_state=37`），用于在同一份数据上直接对比 RF 与 GP。终端表格格式相同（列为 `rf_*`），并输出与 `gpt` 同样样式的 `test_rf_energy.svg` / `test_rf_density.svg`。
+
+随机森林没有后验方差，因此 `sd` 列是**各棵决策树预测值的标准差**（集成离散度），只是不确定性的近似，不是校准过的后验 sigma，不要与 GP 的 sd 直接比较数值。可选参数：`--n`、`--n-estimators`、`--n-jobs`（默认 `-1`，用满所有核）。也可以从 Python 调用 `rft(path, n, seed, plot, n_estimators, n_jobs, prefix)`。
+
 ### `gpevo ei-report`
 
 读一个运行目录里**已经落盘**的东西（不重算任何 GP/ReaxFF）——`results1/Individuals`（每代每个结构的密度）、`results1/OUTPUT.txt`（每代 SUMMARY 表尾的 `Enthalpy(GP) UC Density(GP) UC Residual`，即 GP 均值 μ 与不确定度）、`results1/density.log`（DFT 参考）、`ei.log`（每代 EI 送 DFT 的 id）、`log`（`GP learning curve` 行）——画三张图并打一份逐代报告：

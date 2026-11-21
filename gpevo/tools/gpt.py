@@ -47,6 +47,100 @@ def _gpytorch_is_installed():
     return importlib.util.find_spec("gpytorch") is not None
 
 
+def resolve_data_dir(path):
+    """Locate the training database from INPUT.txt's ``data`` option.
+
+    Shared by gpt() and rft() so both holdout tests read exactly the same
+    rows.  pred() uses the same fallback when called from a CalcFold<N> folder.
+    """
+    run = os.path.abspath(path)
+    inp = os.path.join(run, "INPUT.txt")
+    if not os.path.isfile(inp):
+        raise RuntimeError(f"INPUT.txt not found in {run}")
+    raw = InputParser(inp).option("data")
+    name = str(raw) if raw else "data"
+    data_dir = os.path.join(run, name)
+    if not os.path.isdir(data_dir):
+        alt = os.path.join(os.path.dirname(run), name)
+        if os.path.isdir(alt):
+            return alt
+        raise RuntimeError(f"data directory not found: {data_dir}")
+    return data_dir
+
+
+def prepare_holdout(path, n, seed):
+    """Validate the database and build the standardised train/query split.
+
+    Shared verbatim by gpt() and rft() so the two models are scored on the
+    identical holdout sample, features and DFT targets.
+    """
+    if not isinstance(n, (int, np.integer)) or n <= 0:
+        raise RuntimeError("--n must be a positive integer")
+
+    data_dir = resolve_data_dir(path)
+    for name in ("structures.traj", "feature_mlp.csv", "feature.csv"):
+        if not os.path.isfile(os.path.join(data_dir, name)):
+            raise RuntimeError(f"missing {name} in {data_dir}")
+
+    try:
+        with Trajectory(os.path.join(data_dir, "structures.traj"), "r") as tr:
+            n_rows = len(tr)
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not read {os.path.join(data_dir, 'structures.traj')}: {exc}"
+        ) from exc
+
+    if n >= n_rows:
+        raise RuntimeError(
+            f"--n (={n}) must be < number of crystals ({n_rows})")
+    if n_rows - n < 2:
+        raise RuntimeError(
+            f"need at least 2 training rows after holding out {n} crystals "
+            f"(have {n_rows})")
+
+    try:
+        feature_mlp = np.loadtxt(
+            os.path.join(data_dir, "feature_mlp.csv"),
+            delimiter=",", skiprows=1, ndmin=2)
+        feature = np.loadtxt(
+            os.path.join(data_dir, "feature.csv"),
+            delimiter=",", skiprows=1, ndmin=2)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"could not read feature CSVs in {data_dir}: {exc}") from exc
+
+    if feature_mlp.shape != (n_rows, 11) or feature.shape != (n_rows, 11):
+        raise RuntimeError(
+            f"data mismatch: structures.traj has {n_rows} frames, "
+            f"feature_mlp.csv {feature_mlp.shape}, feature.csv {feature.shape} "
+            "(expected n_rows x 11 for both CSVs)")
+
+    # Same representation as gp()'s residual check (core.py:817-825):
+    # col 0 is the id, cols 1..10 the 10-D features, DFT density is the last
+    # column of feature.csv and DFT energy is column 1.
+    X_raw = feature_mlp[:, 1:]
+    y_density = feature[:, -1]
+    y_energy = feature[:, 1]
+
+    idx = np.sort(
+        np.random.default_rng(seed).choice(n_rows, size=n, replace=False))
+    mask = np.ones(n_rows, dtype=bool)
+    mask[idx] = False
+
+    # Fit the scaler on the training rows only -- fitting it on all rows would
+    # leak the held-out feature statistics into the evaluation.
+    scaler = StandardScaler().fit(X_raw[mask])
+    return {
+        "data_dir": data_dir,
+        "n_rows": n_rows,
+        "idx": idx,
+        "mask": mask,
+        "X_train": scaler.transform(X_raw[mask]),
+        "X_query": scaler.transform(X_raw[idx]),
+        "y_density": y_density,
+        "y_energy": y_energy,
+    }
+
+
 def _read_input(path):
     """Return ``(data_dir, gp_options)`` from the run's INPUT.txt.
 
@@ -54,22 +148,9 @@ def _read_input(path):
     and pred(), so the holdout test refits the same surrogate as production
     instead of silently defaulting to sklearn.
     """
-    run = os.path.abspath(path)
-    inp = os.path.join(run, "INPUT.txt")
-    if not os.path.isfile(inp):
-        raise RuntimeError(f"INPUT.txt not found in {run}")
+    data_dir = resolve_data_dir(path)
+    inp = os.path.join(os.path.abspath(path), "INPUT.txt")
     parser = InputParser(inp)
-
-    raw = parser.option("data")
-    name = str(raw) if raw else "data"
-    data_dir = os.path.join(run, name)
-    if not os.path.isdir(data_dir):
-        # pred() uses the same fallback when called from a CalcFold<N> folder
-        alt = os.path.join(os.path.dirname(run), name)
-        if os.path.isdir(alt):
-            data_dir = alt
-        else:
-            raise RuntimeError(f"data directory not found: {data_dir}")
 
     raw_backend = parser.option("gpbackend")
     backend = str(raw_backend).lower() if raw_backend else "sklearn"
@@ -98,37 +179,49 @@ def _read_input(path):
     return data_dir, options
 
 
-def format_report(records, n_total, n_sampled, data_dir, options=None):
-    """Build the terminal table and the RMSE/MAE summary as a string."""
+def format_report(records, n_total, n_sampled, data_dir, options=None,
+                  model="GP", pred_key="gp", sd_note=None):
+    """Build the terminal table and the RMSE/MAE summary as a string.
+
+    ``model`` / ``pred_key`` let rft() reuse the same layout for RandomForest
+    predictions (``rf_*`` record keys) without duplicating the table code.
+    """
     options = options or {}
-    backend = options.get("backend", "sklearn")
-    header = (f"GP holdout test: data={data_dir}  backend={backend}  "
+    backend = options.get("backend")
+    extra = ""
+    if backend:
+        extra = f"  backend={backend}"
+        if backend == "gpytorch":
+            extra += (f"  iter={options.get('training_iter', 200)} "
+                      f"lr={options.get('learning_rate', 0.1)}")
+    header = (f"{model} holdout test: data={data_dir}{extra}  "
               f"sampled={n_sampled}  train={n_total - n_sampled}")
-    if backend == "gpytorch":
-        header += (f"  iter={options.get('training_iter', 200)} "
-                   f"lr={options.get('learning_rate', 0.1)}")
     lines = [
         header,
         "",
-        (f"{'row':>4} {'dft_rho':>9} {'gp_rho':>9} {'sd_rho':>8}  "
-         f"{'dft_E':>11} {'gp_E':>11} {'sd_E':>9}"),
+        (f"{'row':>4} {'dft_rho':>9} {pred_key + '_rho':>9} {'sd_rho':>8}  "
+         f"{'dft_E':>11} {pred_key + '_E':>11} {'sd_E':>9}"),
     ]
     for rec in records:
         lines.append(
             f"{rec['row']:4d} {rec['dft_density']:9.4f} "
-            f"{rec['gp_density']:9.4f} {rec['gp_density_sigma']:8.4f}  "
-            f"{rec['dft_energy']:11.4f} {rec['gp_energy']:11.4f} "
-            f"{rec['gp_energy_sigma']:9.4f}")
+            f"{rec[pred_key + '_density']:9.4f} "
+            f"{rec[pred_key + '_density_sigma']:8.4f}  "
+            f"{rec['dft_energy']:11.4f} "
+            f"{rec[pred_key + '_energy']:11.4f} "
+            f"{rec[pred_key + '_energy_sigma']:9.4f}")
 
-    d_err = np.array([r["dft_density"] - r["gp_density"] for r in records])
-    e_err = np.array([r["dft_energy"] - r["gp_energy"] for r in records])
+    d_err = np.array([r["dft_density"] - r[pred_key + "_density"]
+                      for r in records])
+    e_err = np.array([r["dft_energy"] - r[pred_key + "_energy"]
+                      for r in records])
     lines.append("")
     lines.append(
         f"rho RMSE={np.sqrt(np.mean(d_err ** 2)):.4f} "
         f"MAE={np.mean(np.abs(d_err)):.4f} g/cm3 | "
         f"E RMSE={np.sqrt(np.mean(e_err ** 2)):.4f} "
         f"MAE={np.mean(np.abs(e_err)):.4f} eV")
-    lines.append("(sd = GP posterior sigma; 95% half-width ~= 1.96*sd)")
+    lines.append(sd_note or "(sd = GP posterior sigma; 95% half-width ~= 1.96*sd)")
     return "\n".join(lines)
 
 
@@ -150,7 +243,7 @@ def _linear_fit(x, y):
 
 def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
                         pad_frac, decimals):
-    """One publication-quality parity scatter with GP uncertainty bars."""
+    """One publication-quality parity scatter with model uncertainty bars."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -218,30 +311,35 @@ def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
     return mae, rmse, r2, slope
 
 
-def _save_parity_plots(records, outdir="."):
-    """Write test_gp_energy.svg and test_gp_density.svg from holdout records."""
+def save_parity_plots(records, outdir=".", prefix="test_gp", model="GP",
+                      pred_key="gp"):
+    """Write ``<prefix>_energy.svg`` / ``<prefix>_density.svg`` parity plots.
+
+    Shared by gpt() and rft(): identical styling, only the model label, the
+    output prefix and the prediction record keys differ.
+    """
     e_dft = np.array([r["dft_energy"] for r in records])
-    e_gp = np.array([r["gp_energy"] for r in records])
-    u_e = np.array([r["gp_energy_sigma"] for r in records])
+    e_pred = np.array([r[pred_key + "_energy"] for r in records])
+    u_e = np.array([r[pred_key + "_energy_sigma"] for r in records])
     e_dft_rel = e_dft - e_dft.min()
-    e_gp_rel = e_gp - e_gp.min()
+    e_pred_rel = e_pred - e_pred.min()
 
     d_dft = np.array([r["dft_density"] for r in records])
-    d_gp = np.array([r["gp_density"] for r in records])
-    u_d = np.array([r["gp_density_sigma"] for r in records])
+    d_pred = np.array([r[pred_key + "_density"] for r in records])
+    u_d = np.array([r[pred_key + "_density_sigma"] for r in records])
 
-    energy_path = os.path.join(outdir, "test_gp_energy.svg")
-    density_path = os.path.join(outdir, "test_gp_density.svg")
+    energy_path = os.path.join(outdir, f"{prefix}_energy.svg")
+    density_path = os.path.join(outdir, f"{prefix}_density.svg")
 
     mae_e, rmse_e, r2_e, slope_e = _save_parity_figure(
-        e_dft_rel, e_gp_rel, u_e,
+        e_dft_rel, e_pred_rel, u_e,
         "DFT relative energy (eV)",
-        "GP-predicted relative energy (eV)",
+        f"{model}-predicted relative energy (eV)",
         "eV", energy_path, 0.08, 3)
     mae_d, rmse_d, r2_d, slope_d = _save_parity_figure(
-        d_dft, d_gp, u_d,
+        d_dft, d_pred, u_d,
         r"DFT density (g/cm$^3$)",
-        r"GP-predicted density (g/cm$^3$)",
+        rf"{model}-predicted density (g/cm$^3$)",
         "g/cm³", density_path, 0.15, 4)
 
     print("═" * 60)
@@ -257,6 +355,10 @@ def _save_parity_plots(records, outdir="."):
     return energy_path, density_path
 
 
+# Backwards-compatible name used by earlier revisions of gpt().
+_save_parity_plots = save_parity_plots
+
+
 def gpt(path=".", n=5, seed=0, plot=True):
     """Refit the GP without ``n`` sampled crystals and report their predictions.
 
@@ -266,63 +368,12 @@ def gpt(path=".", n=5, seed=0, plot=True):
     With ``plot=True`` also writes ``test_gp_energy.svg`` and
     ``test_gp_density.svg`` (DFT vs GP parity scatters with GP uncertainty).
     """
-    if not isinstance(n, (int, np.integer)) or n <= 0:
-        raise RuntimeError("--n must be a positive integer")
-
     data_dir, options = _read_input(path)
-    for name in ("structures.traj", "feature_mlp.csv", "feature.csv"):
-        if not os.path.isfile(os.path.join(data_dir, name)):
-            raise RuntimeError(f"missing {name} in {data_dir}")
-
-    try:
-        with Trajectory(os.path.join(data_dir, "structures.traj"), "r") as tr:
-            n_rows = len(tr)
-    except Exception as exc:
-        raise RuntimeError(
-            f"could not read {os.path.join(data_dir, 'structures.traj')}: {exc}"
-        ) from exc
-
-    if n >= n_rows:
-        raise RuntimeError(
-            f"--n (={n}) must be < number of crystals ({n_rows})")
-    if n_rows - n < 2:
-        raise RuntimeError(
-            f"need at least 2 training rows after holding out {n} crystals "
-            f"(have {n_rows})")
-
-    try:
-        feature_mlp = np.loadtxt(
-            os.path.join(data_dir, "feature_mlp.csv"),
-            delimiter=",", skiprows=1, ndmin=2)
-        feature = np.loadtxt(
-            os.path.join(data_dir, "feature.csv"),
-            delimiter=",", skiprows=1, ndmin=2)
-    except (OSError, ValueError) as exc:
-        raise RuntimeError(f"could not read feature CSVs in {data_dir}: {exc}") from exc
-
-    if feature_mlp.shape != (n_rows, 11) or feature.shape != (n_rows, 11):
-        raise RuntimeError(
-            f"data mismatch: structures.traj has {n_rows} frames, "
-            f"feature_mlp.csv {feature_mlp.shape}, feature.csv {feature.shape} "
-            "(expected n_rows x 11 for both CSVs)")
-
-    # Same representation as gp()'s residual check (core.py:817-825):
-    # col 0 is the id, cols 1..10 the 10-D features, DFT density is the last
-    # column of feature.csv and DFT energy is column 1.
-    X_raw = feature_mlp[:, 1:]
-    y = feature[:, -1]
-    y_eng = feature[:, 1]
-
-    idx = np.sort(
-        np.random.default_rng(seed).choice(n_rows, size=n, replace=False))
-    mask = np.ones(n_rows, dtype=bool)
-    mask[idx] = False
-
-    # Fit the scaler on the training rows only -- fitting it on all rows would
-    # leak the held-out feature statistics into the evaluation.
-    scaler = StandardScaler().fit(X_raw[mask])
-    X_train = scaler.transform(X_raw[mask])
-    X_query = scaler.transform(X_raw[idx])
+    prep = prepare_holdout(path, n, seed)
+    n_rows = prep["n_rows"]
+    idx, mask = prep["idx"], prep["mask"]
+    X_train, X_query = prep["X_train"], prep["X_query"]
+    y, y_eng = prep["y_density"], prep["y_energy"]
 
     # load_gaussian_process caches to RELATIVE gpr_*.pkl and overwrites
     # gpcsp.log.  Fit in an empty temporary cwd so a stale full-data model
@@ -360,7 +411,7 @@ def gpt(path=".", n=5, seed=0, plot=True):
 
     print(format_report(records, n_rows, n, data_dir, options))
     if plot:
-        _save_parity_plots(records, outdir=os.getcwd())
+        save_parity_plots(records, outdir=os.getcwd())
     return records
 
 

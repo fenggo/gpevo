@@ -398,6 +398,22 @@ MAE/RMSE/R²) into the current directory: `test_gp_energy.svg` (energies shifted
 to E − E_min) and `test_gp_density.svg`. Python API callers can pass `plot=False`
 to skip the figures.
 
+### `gpevo rft`
+
+The RandomForest counterpart of `gpt`: the same holdout sample, features,
+train/query split and standardisation, but two `RandomForestRegressor` models
+(300 trees, `random_state=37`) are fitted instead of Gaussian processes. Use it
+to compare RF against GP on identical data. It prints the same terminal table
+(`rf_*` columns) and writes `test_rf_energy.svg` / `test_rf_density.svg` with
+the same styling as the `gpt` figures.
+
+RF has no posterior variance, so the `sd` columns are the **standard deviation
+across individual tree predictions** (ensemble disagreement) — an uncertainty
+proxy, not a calibrated posterior sigma; do not compare the numbers directly
+with GP sigmas. Options: `--n`, `--n-estimators`, `--n-jobs` (default `-1`, all
+cores). `rft(path, n, seed, plot, n_estimators, n_jobs, prefix)` is also
+callable from Python.
+
 ### `gpevo ei-report`
 
 Reads what has **already been written to disk** in a run directory (no GP/ReaxFF recomputation) — `results1/Individuals` (density of every structure in every generation), `results1/OUTPUT.txt` (the `Enthalpy(GP) UC Density(GP) UC Residual` block at the end of each generation's SUMMARY table, i.e. the GP mean μ and its uncertainty), `results1/density.log` (DFT reference), `ei.log` (ids EI sent to DFT each generation), `log` (`GP learning curve` lines) — and draws three figures plus a per-generation report:
