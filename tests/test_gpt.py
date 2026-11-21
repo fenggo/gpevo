@@ -183,6 +183,43 @@ def test_gpt_rejects_missing_gpytorch_backend(run_dir, monkeypatch):
         gpt_module.gpt(path=root, n=3, seed=0)
 
 
+def test_gpt_gpytorch_keeps_ambient_threads(run_dir, monkeypatch):
+    """The gpt refit must not throttle GPyTorch down to one BLAS thread."""
+    from gpevo.tools import gpt as gpt_module
+    from threadpoolctl import threadpool_info, threadpool_limits
+
+    root, _data, _mlp, _dft = run_dir
+    with open(os.path.join(root, "INPUT.txt"), "w") as fd:
+        fd.write("data : data\ngpytorch : gpbackend\n")
+    # Keep the test independent of whether the optional extra is installed.
+    monkeypatch.setattr(gpt_module, "_gpytorch_is_installed", lambda: True)
+
+    seen = {}
+
+    def fake_loader(X, y, y_eng, **options):
+        seen["options"] = options
+        # A BLAS library lazily loaded *inside* gpt() inherits the ambient
+        # thread count and is not evidence of throttling.  Only check the
+        # pools that were already pinned to 2 when the call started.
+        seen["threads"] = [p["num_threads"] for p in threadpool_info()
+                           if (p.get("internal_api"), p.get("filepath")) in pinned]
+        return _FakeGPR(-28000.0, 0.3), _FakeGPR(1.8, 0.01)
+
+    monkeypatch.setattr(gpt_module, "load_gaussian_process", fake_loader)
+
+    # Force a known ambient state: if gpt pinned the fit to one thread, these
+    # pools would read 1 instead of 2.  Deterministic on any core count.
+    with threadpool_limits(limits=2):
+        pinned = {(p.get("internal_api"), p.get("filepath"))
+                  for p in threadpool_info() if p["num_threads"] == 2}
+        gpt_module.gpt(path=root, n=2, seed=0)
+
+    assert pinned, "no BLAS threadpool could be pinned to 2"
+    assert seen["options"]["backend"] == "gpytorch"
+    assert seen["threads"], "the pinned pools disappeared"
+    assert all(t == 2 for t in seen["threads"]), seen["threads"]
+
+
 def test_gpt_rejects_unknown_gpbackend(run_dir, monkeypatch):
     from gpevo.tools import gpt as gpt_module
     root, _data, _mlp, _dft = run_dir

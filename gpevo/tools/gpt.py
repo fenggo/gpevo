@@ -37,7 +37,6 @@ import tempfile
 import numpy as np
 from ase.io.trajectory import Trajectory
 from sklearn.preprocessing import StandardScaler
-from threadpoolctl import threadpool_limits
 
 from gpevo.inputparser import InputParser
 from gpevo.uspexkit.core import load_gaussian_process, _gp_predict
@@ -205,15 +204,14 @@ def gpt(path=".", n=5, seed=0):
     with tempfile.TemporaryDirectory(prefix="gpevo_gpt_") as tmp:
         try:
             os.chdir(tmp)
-            # Pin BLAS to one thread for the whole fit.  gpevo imports torch
-            # (via irff), which raises the thread count to the core count;
-            # multithreaded reductions make sklearn's L-BFGS land in
-            # degenerate optima (sd == 0, predictions tens of units off).
-            # core.py pins the sklearn fit itself; this outer pin also covers
-            # the GPyTorch branch and keeps the holdout refit reproducible.
-            with threadpool_limits(limits=1):
-                gpr_energy, gpr_density = load_gaussian_process(
-                    X_train, y[mask], y_eng[mask], **options)
+            # Thread policy lives in core._load_or_fit_gpr: the sklearn fit is
+            # pinned to one thread (multithreaded L-BFGS lands in degenerate
+            # optima, sd == 0), while GPyTorch keeps the ambient thread count
+            # so its L-BFGS runs on all cores.  Do NOT wrap this call in
+            # threadpool_limits(1) -- that silently throttles the gpytorch
+            # backend, which was the original source of the slow refit here.
+            gpr_energy, gpr_density = load_gaussian_process(
+                X_train, y[mask], y_eng[mask], **options)
         finally:
             os.chdir(previous)
 
