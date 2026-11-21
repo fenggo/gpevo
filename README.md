@@ -376,6 +376,11 @@ A **GP test**: unlike `ei-report` (which only reads already-written logs), `gpt`
 comes from INPUT.txt's `data` option (default `data`). It samples `--n` frames
 from `<data>/structures.traj`, drops those rows, refits `StandardScaler` and
 both Gaussian processes on the remaining rows, then predicts the held-out ones.
+The refit honours INPUT.txt's `gpbackend` / `gpiter` / `gplr` — the same options
+`gp_ml.parse_gp_params` passes to `gp()` and `pred()` — so the score measures
+the surrogate the production crystal search actually uses; the backend is
+printed in the report header. If `gpytorch` is selected but not installed,
+`gpt` fails loudly rather than silently scoring sklearn.
 
 No DFT / GULP / MLP calculation is run: DFT density and energy are read from
 `feature.csv`, and the 10-D feature vector of each sampled crystal is row `i`

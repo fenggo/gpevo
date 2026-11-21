@@ -93,7 +93,8 @@ def _build_parser():
 
     parser_gpt = subparsers.add_parser(
         "gpt",
-        help="hold out crystals and compare GP vs DFT density/energy (GP test)",
+        help="hold out crystals and compare GP vs DFT density/energy "
+             "(GP test; backend from INPUT.txt's gpbackend)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser_gpt.add_argument("-p", "--path", default=".",

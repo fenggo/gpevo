@@ -17,6 +17,13 @@ Row alignment is assumed: frame ``i`` of ``structures.traj`` and row ``i`` of
 both CSV files describe the same crystal.  We check the counts and widths but
 cannot verify the ordering without recomputing the features.
 
+The refit honours INPUT.txt's ``gpbackend`` / ``gpiter`` / ``gplr`` -- the same
+options ``gp_ml.parse_gp_params`` passes to ``gp()`` and ``pred()`` -- so the
+holdout score measures the surrogate the production crystal-prediction loop
+actually uses.  The backend is printed in the report header.  If ``gpytorch``
+is selected but not installed the command fails loudly rather than silently
+scoring sklearn.
+
 Usage::
 
     gpevo gpt --n 5
@@ -36,29 +43,73 @@ from gpevo.inputparser import InputParser
 from gpevo.uspexkit.core import load_gaussian_process, _gp_predict
 
 
-def _resolve_data_dir(path):
-    """Locate the GP data directory from INPUT.txt's ``data`` option."""
+def _gpytorch_is_installed():
+    import importlib.util
+    return importlib.util.find_spec("gpytorch") is not None
+
+
+def _read_input(path):
+    """Return ``(data_dir, gp_options)`` from the run's INPUT.txt.
+
+    ``gp_options`` mirrors the keys ``gp_ml.parse_gp_params`` hands to gp()
+    and pred(), so the holdout test refits the same surrogate as production
+    instead of silently defaulting to sklearn.
+    """
     run = os.path.abspath(path)
     inp = os.path.join(run, "INPUT.txt")
     if not os.path.isfile(inp):
         raise RuntimeError(f"INPUT.txt not found in {run}")
-    raw = InputParser(inp).option("data")
+    parser = InputParser(inp)
+
+    raw = parser.option("data")
     name = str(raw) if raw else "data"
     data_dir = os.path.join(run, name)
     if not os.path.isdir(data_dir):
         # pred() uses the same fallback when called from a CalcFold<N> folder
         alt = os.path.join(os.path.dirname(run), name)
         if os.path.isdir(alt):
-            return alt
-        raise RuntimeError(f"data directory not found: {data_dir}")
-    return data_dir
+            data_dir = alt
+        else:
+            raise RuntimeError(f"data directory not found: {data_dir}")
+
+    raw_backend = parser.option("gpbackend")
+    backend = str(raw_backend).lower() if raw_backend else "sklearn"
+    if backend not in ("sklearn", "gpytorch"):
+        raise RuntimeError(
+            f"unknown gpbackend '{raw_backend}' in {inp}; "
+            "expected 'sklearn' or 'gpytorch'")
+    try:
+        training_iter = max(1, int(float(parser.option("gpiter") or 200)))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"invalid gpiter in {inp}: {exc}") from exc
+    try:
+        learning_rate = float(parser.option("gplr") or 0.1)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"invalid gplr in {inp}: {exc}") from exc
+
+    options = {"backend": backend, "training_iter": training_iter,
+               "learning_rate": learning_rate}
+    if backend == "gpytorch" and not _gpytorch_is_installed():
+        raise RuntimeError(
+            "INPUT.txt selects 'gpytorch : gpbackend' but gpytorch is not "
+            "installed; install it with `pip install gpytorch` (or "
+            "`pip install gpevo[gpytorch]`). Refusing to fall back to sklearn "
+            "silently: the holdout test would then score a model the "
+            "production gp() never uses.")
+    return data_dir, options
 
 
-def format_report(records, n_total, n_sampled, data_dir):
+def format_report(records, n_total, n_sampled, data_dir, options=None):
     """Build the terminal table and the RMSE/MAE summary as a string."""
+    options = options or {}
+    backend = options.get("backend", "sklearn")
+    header = (f"GP holdout test: data={data_dir}  backend={backend}  "
+              f"sampled={n_sampled}  train={n_total - n_sampled}")
+    if backend == "gpytorch":
+        header += (f"  iter={options.get('training_iter', 200)} "
+                   f"lr={options.get('learning_rate', 0.1)}")
     lines = [
-        f"GP holdout test: data={data_dir}  "
-        f"sampled={n_sampled}  train={n_total - n_sampled}",
+        header,
         "",
         (f"{'row':>4} {'dft_rho':>9} {'gp_rho':>9} {'sd_rho':>8}  "
          f"{'dft_E':>11} {'gp_E':>11} {'sd_E':>9}"),
@@ -87,12 +138,12 @@ def gpt(path=".", n=5, seed=0):
 
     Returns one record per sampled crystal (see ``format_report`` for the
     printed columns).  ``seed`` keeps sampling reproducible; it is not exposed
-    as a CLI option.
+    as a CLI option.  The GP backend / training options come from INPUT.txt.
     """
     if not isinstance(n, (int, np.integer)) or n <= 0:
         raise RuntimeError("--n must be a positive integer")
 
-    data_dir = _resolve_data_dir(path)
+    data_dir, options = _read_input(path)
     for name in ("structures.traj", "feature_mlp.csv", "feature.csv"):
         if not os.path.isfile(os.path.join(data_dir, name)):
             raise RuntimeError(f"missing {name} in {data_dir}")
@@ -156,13 +207,13 @@ def gpt(path=".", n=5, seed=0):
             os.chdir(tmp)
             # Pin BLAS to one thread for the whole fit.  gpevo imports torch
             # (via irff), which raises the thread count to the core count;
-            # multithreaded reductions make L-BFGS land in degenerate optima
-            # (sd == 0, predictions tens of units off).  core.py applies the
-            # same pin inside _load_or_fit_gpr; keep it here too so this
-            # held-out evaluation stays reproducible even if that changes.
+            # multithreaded reductions make sklearn's L-BFGS land in
+            # degenerate optima (sd == 0, predictions tens of units off).
+            # core.py pins the sklearn fit itself; this outer pin also covers
+            # the GPyTorch branch and keeps the holdout refit reproducible.
             with threadpool_limits(limits=1):
                 gpr_energy, gpr_density = load_gaussian_process(
-                    X_train, y[mask], y_eng[mask])
+                    X_train, y[mask], y_eng[mask], **options)
         finally:
             os.chdir(previous)
 
@@ -182,7 +233,7 @@ def gpt(path=".", n=5, seed=0):
             "gp_energy_sigma": float(s_e),
         })
 
-    print(format_report(records, n_rows, n, data_dir))
+    print(format_report(records, n_rows, n, data_dir, options))
     return records
 
 
@@ -191,7 +242,8 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(
         prog="gpevo gpt",
-        description="Hold out crystals and compare GP vs DFT density/energy.")
+        description="Hold out crystals and compare GP vs DFT density/energy "
+                    "(GP backend from INPUT.txt).")
     parser.add_argument("-p", "--path", default=".",
                         help="run directory containing INPUT.txt")
     parser.add_argument("--n", type=int, default=5,

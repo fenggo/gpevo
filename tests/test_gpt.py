@@ -62,10 +62,11 @@ class _FakeGPR:
 
 def _stub_loader(monkeypatch, gpt_module, captured):
     """Fake GP models; record what was trained and leave a cwd sentinel."""
-    def fake_loader(X, y, y_eng):
+    def fake_loader(X, y, y_eng, **options):
         captured["X"] = X.copy()
         captured["y"] = y.copy()
         captured["y_eng"] = y_eng.copy()
+        captured["options"] = options
         captured["cwd"] = os.getcwd()
         with open("gpt_sentinel.txt", "w") as fd:
             fd.write("x")
@@ -135,6 +136,62 @@ def test_gpt_refits_without_heldout_rows(run_dir, monkeypatch):
     np.testing.assert_allclose(captured["y_eng"], dft[mask, 0])
     expected = StandardScaler().fit(mlp[mask]).transform(mlp[mask])
     np.testing.assert_allclose(captured["X"], expected)
+
+
+def test_gpt_forwards_default_gp_options(run_dir, monkeypatch):
+    """INPUT.txt without gpbackend still passes the same defaults as gp()."""
+    from gpevo.tools import gpt as gpt_module
+    root, _data, _mlp, _dft = run_dir
+    captured = _stub_loader(monkeypatch, gpt_module, {})
+
+    gpt_module.gpt(path=root, n=3, seed=0)
+
+    assert captured["options"] == {
+        "backend": "sklearn", "training_iter": 200, "learning_rate": 0.1}
+
+
+def test_gpt_honours_gpbackend_from_input(run_dir, monkeypatch, capsys):
+    """The holdout refit must use the backend/options production gp() uses."""
+    from gpevo.tools import gpt as gpt_module
+    root, _data, _mlp, _dft = run_dir
+    with open(os.path.join(root, "INPUT.txt"), "w") as fd:
+        fd.write("data : data\ngpytorch : gpbackend\n50 : gpiter\n0.05 : gplr\n")
+    # gpytorch is an opt-in extra; pretend it is installed so we can assert
+    # the options are forwarded without importing torch.
+    monkeypatch.setattr(gpt_module, "_gpytorch_is_installed", lambda: True)
+    captured = _stub_loader(monkeypatch, gpt_module, {})
+
+    gpt_module.gpt(path=root, n=3, seed=0)
+
+    assert captured["options"] == {
+        "backend": "gpytorch", "training_iter": 50, "learning_rate": 0.05}
+    out = capsys.readouterr().out
+    assert "backend=gpytorch" in out
+    assert "iter=50" in out and "lr=0.05" in out
+
+
+def test_gpt_rejects_missing_gpytorch_backend(run_dir, monkeypatch):
+    """Never silently score sklearn when gpytorch was requested."""
+    from gpevo.tools import gpt as gpt_module
+    root, _data, _mlp, _dft = run_dir
+    with open(os.path.join(root, "INPUT.txt"), "w") as fd:
+        fd.write("data : data\ngpytorch : gpbackend\n")
+    monkeypatch.setattr(gpt_module, "_gpytorch_is_installed", lambda: False)
+    _stub_loader(monkeypatch, gpt_module, {})
+
+    with pytest.raises(RuntimeError, match="gpytorch is not installed"):
+        gpt_module.gpt(path=root, n=3, seed=0)
+
+
+def test_gpt_rejects_unknown_gpbackend(run_dir, monkeypatch):
+    from gpevo.tools import gpt as gpt_module
+    root, _data, _mlp, _dft = run_dir
+    with open(os.path.join(root, "INPUT.txt"), "w") as fd:
+        fd.write("data : data\ntorch : gpbackend\n")
+    _stub_loader(monkeypatch, gpt_module, {})
+
+    with pytest.raises(RuntimeError, match="unknown gpbackend"):
+        gpt_module.gpt(path=root, n=3, seed=0)
 
 
 def test_gpt_does_not_pollute_run_directory(run_dir, monkeypatch):

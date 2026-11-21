@@ -359,7 +359,7 @@ gpevo gpt -p DIR --n 5
 
 ### `gpevo gpt`
 
-一个 **GP 测试**命令：与 `ei-report`（只读已落盘日志）不同，`gpt` 会**重新训练**模型，给出诚实的样本外评分。数据目录取自 INPUT.txt 的 `data` 选项（默认 `data`）。它从 `<data>/structures.traj` 中随机抽取 `--n` 个晶体，把这些行剔除后重新拟合 `StandardScaler` 和两个高斯过程，再对留出的晶体做预测。
+一个 **GP 测试**命令：与 `ei-report`（只读已落盘日志）不同，`gpt` 会**重新训练**模型，给出诚实的样本外评分。数据目录取自 INPUT.txt 的 `data` 选项（默认 `data`）。它从 `<data>/structures.traj` 中随机抽取 `--n` 个晶体，把这些行剔除后重新拟合 `StandardScaler` 和两个高斯过程，再对留出的晶体做预测。重训沿用 INPUT.txt 的 `gpbackend` / `gpiter` / `gplr`——与 `gp_ml.parse_gp_params` 传给 `gp()`、`pred()` 的参数一致——因此评分针对的是主程序晶体搜索实际使用的那个模型；所用后端会打印在报告表头。若设置了 `gpytorch` 却未安装，`gpt` 会直接报错，而不是悄悄用 sklearn 出一份好看的结果。
 
 **不跑任何 DFT / GULP / MLP 计算**：DFT 密度和能量直接读 `feature.csv`，抽样晶体的 10 维特征就是 `feature_mlp.csv` 的第 `i` 行（对应 `structures_mlp.traj` 里 MLP 弛豫几何的特征）。要求 trajectory 与两个 CSV 的第 `i` 行对应同一个晶体；目前只校验行数和列数。
 
