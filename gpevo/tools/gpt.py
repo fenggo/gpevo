@@ -242,7 +242,7 @@ def _linear_fit(x, y):
 
 
 def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
-                        pad_frac, decimals):
+                        pad_frac, decimals, scatter_color="#0072B2"):
     """One publication-quality parity scatter with model uncertainty bars."""
     import matplotlib
     matplotlib.use("Agg")
@@ -262,14 +262,14 @@ def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
         "xtick.major.size": 4, "ytick.major.size": 4,
         "xtick.direction": "in", "ytick.direction": "in",
     }
-    blue, dark, orange = "#0072B2", "#333333", "#D55E00"
+    dark, orange = "#333333", "#D55E00"
 
     with plt.rc_context(style):
         fig, ax = plt.subplots(figsize=(5.0, 5.0))
-        ax.errorbar(x, y, yerr=1.96 * sigma, fmt="none", ecolor=blue,
+        ax.errorbar(x, y, yerr=1.96 * sigma, fmt="none", ecolor=scatter_color,
                     elinewidth=0.4, capsize=0, alpha=0.20, zorder=1)
-        ax.scatter(x, y, c=blue, s=30, edgecolors="white", linewidths=0.3,
-                   alpha=0.85, zorder=3)
+        ax.scatter(x, y, c=scatter_color, s=30, edgecolors="white",
+                   linewidths=0.3, alpha=0.85, zorder=3)
 
         all_xy = np.concatenate([x, y])
         lims = [all_xy.min(), all_xy.max()]
@@ -312,11 +312,11 @@ def _save_parity_figure(x, y, sigma, xlabel, ylabel, unit, outpath,
 
 
 def save_parity_plots(records, outdir=".", prefix="test_gp", model="GP",
-                      pred_key="gp"):
+                      pred_key="gp", scatter_color="#0072B2"):
     """Write ``<prefix>_energy.svg`` / ``<prefix>_density.svg`` parity plots.
 
     Shared by gpt() and rft(): identical styling, only the model label, the
-    output prefix and the prediction record keys differ.
+    output prefix, the prediction record keys and the scatter colour differ.
     """
     e_dft = np.array([r["dft_energy"] for r in records])
     e_pred = np.array([r[pred_key + "_energy"] for r in records])
@@ -335,12 +335,12 @@ def save_parity_plots(records, outdir=".", prefix="test_gp", model="GP",
         e_dft_rel, e_pred_rel, u_e,
         "DFT relative energy (eV)",
         f"{model}-predicted relative energy (eV)",
-        "eV", energy_path, 0.08, 3)
+        "eV", energy_path, 0.08, 3, scatter_color)
     mae_d, rmse_d, r2_d, slope_d = _save_parity_figure(
         d_dft, d_pred, u_d,
         r"DFT density (g/cm$^3$)",
         rf"{model}-predicted density (g/cm$^3$)",
-        "g/cm³", density_path, 0.15, 4)
+        "g/cm³", density_path, 0.15, 4, scatter_color)
 
     print("═" * 60)
     print("Energy parity — relative energies (E − E_min)")

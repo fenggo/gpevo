@@ -178,6 +178,29 @@ def test_rft_writes_parity_plots(run_dir, monkeypatch, tmp_path, capsys):
     assert "test_rf_energy.svg" in out
 
 
+def test_rft_uses_green_scatter(run_dir, monkeypatch, tmp_path):
+    """rft parity plots use the green #009E73 scatter colour."""
+    from gpevo.tools import rft as rft_module
+    root, _data, _mlp, _dft = run_dir
+    _stub_forests(monkeypatch, rft_module, {})
+    monkeypatch.chdir(tmp_path)
+
+    seen = {}
+    real = rft_module.save_parity_plots
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(rft_module, "save_parity_plots", spy)
+    rft_module.rft(path=root, n=3, seed=0, plot=True)
+
+    assert seen["scatter_color"] == "#009E73"
+    for name in ("test_rf_energy.svg", "test_rf_density.svg"):
+        svg = (tmp_path / name).read_text(encoding="utf-8").lower()
+        assert "#009e73" in svg, name
+
+
 @pytest.mark.parametrize("mutation", [
     "no_input", "no_csv", "n_zero", "n_too_large", "train_too_small",
     "count_mismatch",

@@ -95,7 +95,8 @@ def rft(path=".", n=5, seed=0, plot=True, n_estimators=_N_ESTIMATORS,
                 "95% half-width ~= 1.96*sd)"))
     if plot:
         save_parity_plots(records, outdir=os.getcwd(), prefix=prefix,
-                          model="RF", pred_key="rf")
+                          model="RF", pred_key="rf",
+                          scatter_color="#009E73")
     return records
 
 
