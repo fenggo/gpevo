@@ -175,36 +175,33 @@ def test_default_backend_still_uses_sklearn_tag(monkeypatch, tmp_path):
     core._load_or_fit_gpr("d.pkl", np.zeros((2, 2)), np.zeros(2), None)
     with open("d.pkl", "rb") as fp:
         blob = pickle.load(fp)
-    assert blob["version"] == core._KERNEL_VERSION == 3
+    assert blob["version"] == core._KERNEL_VERSION == 4
     assert isinstance(blob["model"], _FakeSklearnGPR)
     assert core._GPYTORCH_VERSION == "gpytorch-2"
 
 
-def test_gp_fit_and_predict_pin_blas_threads(monkeypatch, tmp_path):
-    """Regression: multithreaded BLAS produced a degenerate GP (sd==0).
+def test_gp_fit_and_predict_keep_ambient_blas_threads(monkeypatch, tmp_path):
+    """sklearn fit/predict must not throttle BLAS below the ambient count.
 
-    gpevo imports torch/MKL, which raises the BLAS thread count to the core
-    count.  Both sklearn's L-BFGS fit and the Cholesky solve in predict then
-    become numerically unstable.  Guard both single-thread pins so nobody
-    removes them and silently reintroduces the bad `gpevo gpt` results.
+    c0d1f5f pinned both steps to one thread to dodge degenerate L-BFGS optima,
+    but that capped CPU at 100%.  The pin is removed so fits use all cores;
+    verify neither step reaches for threadpool_limits.  If the sd==0
+    regression returns, restore the pins and re-check with `gpevo gpt`.
     """
     seen = []
-    real_limits = core.threadpool_limits
 
     def spy_limits(*args, **kwargs):
         seen.append(kwargs.get("limits", args[0] if args else None))
-        return real_limits(*args, **kwargs)
 
-    monkeypatch.setattr(core, "threadpool_limits", spy_limits)
+    monkeypatch.setattr(core, "threadpool_limits", spy_limits, raising=False)
     monkeypatch.setattr(core, "GaussianProcessRegressor", _FakeSklearnGPR)
     monkeypatch.chdir(tmp_path)
 
     core._load_or_fit_gpr("d.pkl", np.zeros((3, 2)), np.zeros(3), None)
-    assert seen == [1], "sklearn GPR fit must pin BLAS to one thread"
+    assert seen == [], "sklearn GPR fit must not pin BLAS threads"
 
-    seen.clear()
     core._gp_predict(_FakeSklearnGPR(), np.zeros((2, 2)))
-    assert seen == [1], "GP predict must pin BLAS to one thread"
+    assert seen == [], "GP predict must not pin BLAS threads"
 
 
 # ── cache isolation between backends ────────────────────────────────────

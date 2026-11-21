@@ -382,12 +382,10 @@ def gpt(path=".", n=5, seed=0, plot=True):
     with tempfile.TemporaryDirectory(prefix="gpevo_gpt_") as tmp:
         try:
             os.chdir(tmp)
-            # Thread policy lives in core._load_or_fit_gpr: the sklearn fit is
-            # pinned to one thread (multithreaded L-BFGS lands in degenerate
-            # optima, sd == 0), while GPyTorch keeps the ambient thread count
-            # so its L-BFGS runs on all cores.  Do NOT wrap this call in
-            # threadpool_limits(1) -- that silently throttles the gpytorch
-            # backend, which was the original source of the slow refit here.
+            # Both sklearn and GPyTorch keep the ambient BLAS thread count in
+            # core._load_or_fit_gpr so fits can use all cores.  Do NOT wrap
+            # this call in threadpool_limits(1) -- that was the original
+            # source of the slow GPyTorch refit here.
             gpr_energy, gpr_density = load_gaussian_process(
                 X_train, y[mask], y_eng[mask], **options)
         finally:

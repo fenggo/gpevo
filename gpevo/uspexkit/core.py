@@ -13,7 +13,6 @@ from sklearn.gaussian_process.kernels import (RBF,DotProduct, WhiteKernel,
                                               Matern,
                                               ExpSineSquared)
 from sklearn.neural_network import MLPRegressor
-from threadpoolctl import threadpool_limits
 # from ase import build
 from ase.io import read,write
 from ase.io.trajectory import Trajectory, TrajectoryWriter
@@ -580,10 +579,12 @@ def get_gulp_energy(atoms, ncpu=8,o=True):
 # models are cached in gpr_*.pkl, and without this stamp a cached model would
 # silently keep the old kernel (the old code required deleting the pkls by
 # hand -- see the commented-out "refit" logic this replaces).
-# v3: refit every cached model so pickles written by the multithreaded,
-# numerically unstable fit (degenerate kernel, sd==0, wild predictions) are
-# replaced by the single-thread fit.  The kernel spec itself is unchanged.
-_KERNEL_VERSION = 3
+# v4: the sklearn BLAS pin was removed so fits use the ambient thread count;
+# refit cached v3 models (written under the single-thread policy) so every
+# model follows the same thread policy.  The kernel spec is unchanged.
+# c0d1f5f had used v3 to force a refit in the *opposite* direction (the
+# multithreaded fit then produced a degenerate kernel and sd==0).
+_KERNEL_VERSION = 4
 # Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag on a
 # separate numbering scheme means switching backends always refits, without
 # invalidating existing sklearn caches.
@@ -621,16 +622,14 @@ def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
     else:
         gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10,
                                        normalize_y=True, random_state=0)
-        # Importing gpevo pulls in torch/MKL and raises the BLAS thread count
-        # to the core count.  Multithreaded reductions make L-BFGS land in
-        # different (often degenerate) hyperparameter optima -- length scales
-        # ~1e-4 and noise ~1e-8 give a near-singular kernel, sd==0 and
-        # predictions tens of eV/g/cm3 off.  Pin BLAS to one thread for the
-        # sklearn fit so gp(), pred() and gpevo gpt all get the same,
-        # well-conditioned model.  (GPyTorch uses its own optimiser; leave it
-        # alone rather than throttling an untested opt-in backend.)
-        with threadpool_limits(limits=1):
-            gpr.fit(X, y)
+        # BLAS threads are left at the ambient count (torch/MKL raises it to
+        # the core count on import) so the fit can use all available cores.
+        # NOTE: c0d1f5f pinned this to one thread because multithreaded
+        # reductions once made L-BFGS land in degenerate optima (sd==0, wild
+        # predictions).  If that regression reappears, restore
+        # threadpool_limits(limits=1) here and in _gp_predict, and check with
+        # `gpevo gpt` that rho/E RMSE stay low and posterior sigma > 0.
+        gpr.fit(X, y)
     with open(path, "wb") as f:
         pickle.dump({"version": version, "model": gpr}, f)
     return gpr
@@ -681,16 +680,13 @@ def _write_gp_diagnostics(fl, gpr, X, y, label, backend):
 
 
 def _gp_predict(gpr, X, return_std=True):
-    """``gpr.predict`` with BLAS pinned to one thread.
+    """``gpr.predict`` with the ambient BLAS thread count.
 
-    The Cholesky solve inside sklearn's predict() is as numerically sensitive
-    as the fit: with 40 threads it can return slightly negative variances that
-    sklearn silently clamps to 0.  That kills the uncertainty fed to EI, so
-    keep the predict step single-threaded just like the sklearn fit.  The
-    GPyTorch backend uses its own Cholesky path; the pin is harmless there.
+    The Cholesky solve used to be pinned to one thread alongside the fit.  It
+    now runs at the ambient count; see the c0d1f5f regression note in
+    _load_or_fit_gpr before reintroducing any pin here.
     """
-    with threadpool_limits(limits=1):
-        return gpr.predict(X, return_std=return_std)
+    return gpr.predict(X, return_std=return_std)
 
 
 def load_gaussian_process(X, y, y_eng, backend="sklearn",
@@ -701,7 +697,7 @@ def load_gaussian_process(X, y, y_eng, backend="sklearn",
     # is multimodal, and restricting length scales / noise makes L-BFGS settle
     # in a regime where sklearn's posterior variance goes slightly negative
     # and is clamped to 0 -> sd==0, which breaks EI in gp().  Reproducibility
-    # comes from the single-thread fit in _load_or_fit_gpr, not from bounds.
+    # comes from random_state=0 pinning the restart sequence, not from bounds.
     # density: Matern 5/2 + linear + noise.  LOO on the training set showed
     # this target is insensitive to the core (RBF is within noise), so the
     # original spec is kept.
