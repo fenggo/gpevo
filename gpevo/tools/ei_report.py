@@ -80,7 +80,7 @@ def parse_individuals(path):
 
 
 def parse_density_predict(path):
-    """``{id: {residual, density_gp, std, density_mlp, density_rf, energy}}``."""
+    """``{id: {residual, density_gp, std, density_mlp, energy}}``."""
     data = {}
     if not path:
         return {}
@@ -88,17 +88,16 @@ def parse_density_predict(path):
         with open(path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 parts = line.split()
-                if not parts or parts[0].startswith("#") or len(parts) < 6:
+                if not parts or parts[0].startswith("#") or len(parts) < 5:
                     continue
                 try:
                     cid = int(float(parts[0]))
                     data[cid] = {
                         "residual": float(parts[1]),
                         "density_mlp": float(parts[2]),
-                        "density_rf": float(parts[3]),
-                        "density_gp": float(parts[4]),
-                        "std": float(parts[5]),
-                        "energy": float(parts[6]) if len(parts) >= 7 else float("nan"),
+                        "density_gp": float(parts[3]),
+                        "std": float(parts[4]),
+                        "energy": float(parts[5]) if len(parts) >= 6 else float("nan"),
                     }
                 except ValueError:
                     continue

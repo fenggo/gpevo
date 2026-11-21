@@ -44,10 +44,10 @@ def run(tmp_path):
                 fd.write(_row(gen, cid, densities[cid]))
 
     with open(res / "density_predict.log", "w", encoding="utf-8") as fd:
-        fd.write("# Crystal_id Residual Density_mlp Density_rf Density_gp std_den "
+        fd.write("# Crystal_id Residual Density_mlp Density_gp std_den "
                  "Energy std_eng\n")
         for cid, value in densities.items():
-            fd.write(f" {cid} 0.004 1.90 1.81 {value:.4f} 0.0170 -28080.9 0.11\n")
+            fd.write(f" {cid} 0.004 1.90 {value:.4f} 0.0170 -28080.9 0.11\n")
 
     with open(res / "OUTPUT.txt", "w", encoding="utf-8") as fd:
         header = ("ID  Origin     Composition Enthalpy(eV) Volume(A^3) "
@@ -327,8 +327,8 @@ def test_convergence_without_sigma_still_plots(run):
     rows, gen_ids = report_module.parse_individuals(str(res / "Individuals"))
     # only the last generation was kept, as a rewritten density_predict.log had
     (res / "density_predict.log").write_text(
-        "# Crystal_id Residual Density_mlp Density_rf Density_gp std_den Energy std_eng\n"
-        f" 25 0.004 1.90 1.81 {densities[25]:.4f} 0.0170 -28080.9 0.11\n",
+        "# Crystal_id Residual Density_mlp Density_gp std_den Energy std_eng\n"
+        f" 25 0.004 1.90 {densities[25]:.4f} 0.0170 -28080.9 0.11\n",
         encoding="utf-8")
     pred = report_module.parse_density_predict(str(res / "density_predict.log"))
     dft = report_module.parse_density_log(str(res / "density.log"))

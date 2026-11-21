@@ -726,9 +726,9 @@ def test_metrics_row_prefers_the_posterior_sigma_and_falls_back():
 def test_read_gp_csv_converts_the_95pct_columns(tmp_path):
     path = tmp_path / "gp.csv"
     path.write_text(
-        "index, nearest, residual, density_min, density_rf, density_gp, "
+        "index, nearest, residual, density_min, density_gp, "
         "uncertainty, energy_min, energy_pred, uncertainty_eng\n"
-        "11, 0, 1.0, 1.7, 1.75, 1.80, 0.098, -10.0, -10.1, 0.196\n",
+        "11, 0, 1.0, 1.7, 1.80, 0.098, -10.0, -10.1, 0.196\n",
         encoding="utf-8")
     table = gp_ml._read_gp_csv(str(path))
     assert table[11][gp_ml._UNCERT] == pytest.approx(0.05)
@@ -737,7 +737,7 @@ def test_read_gp_csv_converts_the_95pct_columns(tmp_path):
 
 def _ei_table(sigma):
     nan = float("nan")
-    return {11: [nan, 1.0, nan, nan, 1.90, sigma, nan, -10.0, sigma]}
+    return {11: [nan, 1.0, nan, 1.90, sigma, nan, -10.0, sigma]}
 
 
 def test_ei_uses_posterior_sigma_but_u_gate_uses_the_95pct_width():
@@ -805,7 +805,7 @@ def test_select_by_ei_reports_the_incumbent_gap(run, capsys):
     params = gp_ml.parse_gp_params(
         _org(str(_home), _res_folder, k=1, den=1.0, u=0.001))
     nan = float("nan")
-    table = {11: [nan, 1.0, nan, nan, 1.8032, 0.05, nan, -10.0, 0.05]}
+    table = {11: [nan, 1.0, nan, 1.8032, 0.05, nan, -10.0, 0.05]}
     gp_ml._select_by_ei([11], table, params, data_dir)
 
     out = capsys.readouterr().out
@@ -854,7 +854,7 @@ def test_ei_filter_uses_the_shared_cutoff():
     nan = float("nan")
 
     def _table(residual):
-        return {11: [nan, residual, nan, nan, 1.90, 0.05, nan, -10.0, 0.05]}
+        return {11: [nan, residual, nan, 1.90, 0.05, nan, -10.0, 0.05]}
 
     # A residual above the shared cutoff must be rejected.
     _sel, _label, reason, _target = gp_ml._select_by_ei(

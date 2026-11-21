@@ -13,8 +13,8 @@ USPEX 310 共晶 (TNT₄·CL20₄) 全代密度分析 —— 纯绘图 + 报告.
   3. 终端报告 —— 每代 top-5 密度 / EI-2 / DFT 精确数值
 
 GP / EI 语义 (与 CalcFitness_310.m 一致):
-  density_gp  = density_predict.log 第5列
-  σ           = 1.96 × std_den  (gp.csv col7 = 1.96 * std_den)
+  density_gp  = density_predict.log 第4列
+  σ           = 1.96 × std_den  (gp.csv col5 = 1.96 * std_den)
   f_best      = max(density_gp) 于 residual ≤ RESIDUAL_CUT (10.0) 的本代有效晶体
   EI          = (μ-f_best)·Φ(Z) + σ·φ(Z),  Z=(μ-f_best)/σ
   每代取 EI 前 k 个 (INPUT.txt --k=2)
@@ -75,7 +75,7 @@ def parse_individuals(path):
 
 
 def parse_density_predict(path):
-    """→ {id: (residual, density_gp, std_den, density_mlp, density_rf, energy)}  (同 id 取最后)"""
+    """→ {id: (residual, density_gp, std_den, density_mlp, energy)}  (同 id 取最后)"""
     data = {}
     if not os.path.exists(path):
         return data
@@ -85,16 +85,16 @@ def parse_density_predict(path):
             if not line or line.startswith("#"):
                 continue
             p = line.split()
-            if len(p) < 6:
+            if len(p) < 5:
                 continue
             try:
                 cid = int(p[0])
-                residual = float(p[1]); dmlp = float(p[2]); drf = float(p[3])
-                dgp = float(p[4]); std = float(p[5])
-                eng = float(p[6]) if len(p) >= 7 else float("nan")
+                residual = float(p[1]); dmlp = float(p[2])
+                dgp = float(p[3]); std = float(p[4])
+                eng = float(p[5]) if len(p) >= 6 else float("nan")
             except ValueError:
                 continue
-            data[cid] = (residual, dgp, std, dmlp, drf, eng)
+            data[cid] = (residual, dgp, std, dmlp, eng)
     return data
 
 
@@ -149,7 +149,7 @@ def build_per_gen(gen_ids, pred, dft, k=2, top=5):
         f_best = max((r[2] for r in valid), default=float("-inf"))  # r[2]=density_gp
 
         ei_list = []
-        for cid, residual, dgp, std, dmlp, drf, eng in valid:
+        for cid, residual, dgp, std, dmlp, eng in valid:
             sigma = UNCERT_SCALE * std
             ei = expected_improvement(dgp, sigma, f_best)
             ei_list.append((ei, cid, dgp, sigma, residual))

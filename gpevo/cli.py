@@ -64,7 +64,7 @@ def _build_parser():
 
     parser_pred = subparsers.add_parser(
         "pred",
-        help="predict density/energy with GP+MLP+RandomForest",
+        help="predict density/energy with Gaussian Process",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser_pred.add_argument("--t", default="Individuals.traj",

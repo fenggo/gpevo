@@ -31,8 +31,8 @@ def _load_gp_metrics(s, ORG):
     Since ``uspexkit.gp()`` returns its metrics, submitJob already stores them
     on the structure; the file is only consulted when they are missing (e.g. a
     run started before the switch, or a structure evaluated by the CLI).
-    Columns: 2 residual, 5 density_gp, 6 uncertainty, 8 energy_pred,
-    9 uncertainty_eng.
+    Columns: 2 residual, 4 density_gp, 5 uncertainty, 7 energy_pred,
+    8 uncertainty_eng.
     """
     for field in ("residual", "distance", "density_gp", "uq", "energy_gp", "uq_eng"):
         if not hasattr(s, field):
@@ -52,7 +52,7 @@ def _load_gp_metrics(s, ORG):
             matched = None
             target = int(getattr(s, "Number", 0))
             for row in reader:
-                if len(row) < 7:
+                if len(row) < 6:
                     continue
                 try:
                     if int(float(row[0])) != target:
@@ -63,11 +63,11 @@ def _load_gp_metrics(s, ORG):
             if matched is not None:
                 s.residual = _float_or_nan(matched[2])
                 s.distance = _float_or_nan(matched[2])
-                s.density_gp = _float_or_nan(matched[5])
-                s.uq = _float_or_nan(matched[6])
-                if len(matched) >= 10:
-                    s.energy_gp = _float_or_nan(matched[8])
-                    s.uq_eng = _float_or_nan(matched[9])
+                s.density_gp = _float_or_nan(matched[4])
+                s.uq = _float_or_nan(matched[5])
+                if len(matched) >= 9:
+                    s.energy_gp = _float_or_nan(matched[7])
+                    s.uq_eng = _float_or_nan(matched[8])
     except Exception:
         # A malformed or missing gp.csv must not break job reading; keep
         # inherited values (already initialized above) for this individual.
