@@ -1,4 +1,9 @@
-"""Fresh GP runs keep Specific/ffield.json in sync with the data copy."""
+"""Fresh GP runs sync Specific/ffield.json and derive both force-field files.
+
+Copying the data copy into Specific/ regenerates GULP's reaxff_nn.lib and the
+LAMMPS ReaxFF ffield (for future LAMMPS support); conversion failures are
+reported in the return status but never abort startup.
+"""
 from __future__ import annotations
 
 import json
@@ -42,7 +47,22 @@ def _fake_lib(monkeypatch):
     return calls
 
 
-def test_disabled_gp_does_nothing(tmp_path, _fake_lib):
+@pytest.fixture(autouse=True)
+def _fake_ffield(monkeypatch):
+    """Record the LAMMPS ReaxFF ffield conversion separately from lib()."""
+    import gpevo.uspexkit.core as core
+    calls = []
+
+    def fake(jsonfile, ffieldfile):
+        calls.append((jsonfile, ffieldfile))
+        with open(ffieldfile, "w", encoding="utf-8") as fh:
+            fh.write("REAXFF FFIELD\n")
+
+    monkeypatch.setattr(core, "ffield", fake)
+    return calls
+
+
+def test_disabled_gp_does_nothing(tmp_path, _fake_lib, _fake_ffield):
     _write(tmp_path / "data22" / "ffield.json", DATA_B)
     _write(tmp_path / "Specific" / "ffield.json", DATA_A)
     org = _org(tmp_path, gp=0)
@@ -50,9 +70,10 @@ def test_disabled_gp_does_nothing(tmp_path, _fake_lib):
     assert json.loads((tmp_path / "Specific" / "ffield.json").read_text()) == DATA_A
     assert not (tmp_path / "Specific" / "ffield.json.bak").exists()
     assert _fake_lib == []
+    assert _fake_ffield == []
 
 
-def test_equal_json_different_format_is_noop(tmp_path, _fake_lib):
+def test_equal_json_different_format_is_noop(tmp_path, _fake_lib, _fake_ffield):
     # Same content, different key order/indent -> semantic equality, no backup.
     _write(tmp_path / "data22" / "ffield.json", DATA_A)
     _write(tmp_path / "Specific" / "ffield.json", dict(reversed(list(DATA_A.items()))),
@@ -62,9 +83,11 @@ def test_equal_json_different_format_is_noop(tmp_path, _fake_lib):
     assert (tmp_path / "Specific" / "ffield.json").read_text() == before
     assert not (tmp_path / "Specific" / "ffield.json.bak").exists()
     assert _fake_lib == []
+    assert _fake_ffield == []
 
 
-def test_differing_specific_is_backed_up_replaced_and_converted(tmp_path, _fake_lib):
+def test_differing_specific_is_backed_up_replaced_and_converted(
+        tmp_path, _fake_lib, _fake_ffield):
     _write(tmp_path / "data22" / "ffield.json", DATA_B)
     _write(tmp_path / "Specific" / "ffield.json", DATA_A)
     assert sync_ffield_json(_org(tmp_path)) == "synced"
@@ -74,6 +97,10 @@ def test_differing_specific_is_backed_up_replaced_and_converted(tmp_path, _fake_
     assert _fake_lib == [(str(tmp_path / "Specific" / "ffield.json"),
                           str(tmp_path / "Specific" / "reaxff_nn.lib"))]
     assert (tmp_path / "Specific" / "reaxff_nn.lib").read_text() == "REAXFF LIB\n"
+    # ffield() writes the LAMMPS ReaxFF potential alongside it.
+    assert _fake_ffield == [(str(tmp_path / "Specific" / "ffield.json"),
+                             str(tmp_path / "Specific" / "ffield"))]
+    assert (tmp_path / "Specific" / "ffield").read_text() == "REAXFF FFIELD\n"
 
 
 def test_lib_failure_reports_but_does_not_abort(tmp_path, monkeypatch):
@@ -91,19 +118,51 @@ def test_lib_failure_reports_but_does_not_abort(tmp_path, monkeypatch):
     assert not (tmp_path / "Specific" / "reaxff_nn.lib").exists()
 
 
-def test_missing_specific_copy_is_skipped(tmp_path, _fake_lib):
+def test_ffield_failure_reports_but_does_not_block_lib(tmp_path, monkeypatch):
+    import gpevo.uspexkit.core as core
+
+    def broken(jsonfile, ffieldfile):
+        raise RuntimeError("no LAMMPS ffield writer")
+
+    monkeypatch.setattr(core, "ffield", broken)
+    _write(tmp_path / "data22" / "ffield.json", DATA_B)
+    _write(tmp_path / "Specific" / "ffield.json", DATA_A)
+    assert sync_ffield_json(_org(tmp_path)) == "synced-ffield-error"
+    assert json.loads((tmp_path / "Specific" / "ffield.json").read_text()) == DATA_B
+    # lib() is independent and still produced the GULP force field.
+    assert (tmp_path / "Specific" / "reaxff_nn.lib").read_text() == "REAXFF LIB\n"
+    assert not (tmp_path / "Specific" / "ffield").exists()
+
+
+def test_both_conversion_failures_are_reported(tmp_path, monkeypatch):
+    import gpevo.uspexkit.core as core
+
+    def broken(jsonfile, path):
+        raise RuntimeError("no converter")
+
+    monkeypatch.setattr(core, "lib", broken)
+    monkeypatch.setattr(core, "ffield", broken)
+    _write(tmp_path / "data22" / "ffield.json", DATA_B)
+    _write(tmp_path / "Specific" / "ffield.json", DATA_A)
+    assert sync_ffield_json(_org(tmp_path)) == "synced-lib-ffield-error"
+    assert json.loads((tmp_path / "Specific" / "ffield.json").read_text()) == DATA_B
+
+
+def test_missing_specific_copy_is_skipped(tmp_path, _fake_lib, _fake_ffield):
     _write(tmp_path / "data22" / "ffield.json", DATA_B)
     assert sync_ffield_json(_org(tmp_path)) == "no-specific"
     assert _fake_lib == []
+    assert _fake_ffield == []
 
 
-def test_missing_data_copy_is_skipped(tmp_path, _fake_lib):
+def test_missing_data_copy_is_skipped(tmp_path, _fake_lib, _fake_ffield):
     _write(tmp_path / "Specific" / "ffield.json", DATA_A)
     assert sync_ffield_json(_org(tmp_path)) == "no-data"
     assert _fake_lib == []
+    assert _fake_ffield == []
 
 
-def test_invalid_json_is_skipped_without_touching_files(tmp_path, _fake_lib):
+def test_invalid_json_is_skipped_without_touching_files(tmp_path, _fake_lib, _fake_ffield):
     _write(tmp_path / "data22" / "ffield.json", DATA_B)
     dst = tmp_path / "Specific" / "ffield.json"
     _write(dst, DATA_A)
@@ -112,3 +171,4 @@ def test_invalid_json_is_skipped_without_touching_files(tmp_path, _fake_lib):
     assert dst.read_text() == "{not valid json"
     assert not (tmp_path / "Specific" / "ffield.json.bak").exists()
     assert _fake_lib == []
+    assert _fake_ffield == []

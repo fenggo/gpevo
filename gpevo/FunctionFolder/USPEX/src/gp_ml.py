@@ -634,11 +634,14 @@ def sync_ffield_json(ORG):
     actually uses.  If they differ semantically (JSON content, ignoring key
     order and whitespace) the Specific copy is backed up to ``ffield.json.bak``
     and replaced with the data copy.  The new Specific copy is then converted
-    to ``Specific/reaxff_nn.lib`` via ``uspexkit.lib()`` so both consumers use
-    the same force field.  A failure is logged to the terminal only and never
-    aborts the run.  Returns one of ``"disabled"``, ``"no-data"``,
-    ``"no-specific"``, ``"equal"``, ``"synced"``, ``"synced-lib-error"``,
-    ``"error"``.
+    to both ``Specific/reaxff_nn.lib`` (GULP, via ``uspexkit.lib()``) and
+    ``Specific/ffield`` (LAMMPS ReaxFF potential, via ``uspexkit.ffield()``)
+    so every consumer uses the same force field, including future LAMMPS runs.
+    The two conversions are attempted independently: a failure is logged to
+    the terminal only and never aborts the run, nor blocks the other file.
+    Returns one of ``"disabled"``, ``"no-data"``, ``"no-specific"``,
+    ``"equal"``, ``"synced"``, ``"synced-lib-error"``,
+    ``"synced-ffield-error"``, ``"synced-lib-ffield-error"``, ``"error"``.
     """
     if not gp_enabled(ORG):
         return "disabled"
@@ -677,9 +680,13 @@ def sync_ffield_json(ORG):
                   f"{os.path.basename(data_dir)}/ffield.json; backed up old copy "
                   f"to ffield.json.bak and copied the data version")
 
-    # Keep the derived ReaxFF lib in step with the force field just installed.
-    # lib() is imported lazily (heavy deps) and wrapped: a conversion failure
-    # must not abort startup, the JSON copy is already in place.
+    # Keep the derived force-field files in step with the force field just
+    # installed: GULP's reaxff_nn.lib and LAMMPS's ReaxFF ffield (so a future
+    # LAMMPS package sees the same parameters).  Both converters are imported
+    # lazily (heavy deps) and wrapped: a conversion failure must not abort
+    # startup, the JSON copy is already in place.  Try each independently so
+    # one broken converter cannot suppress the other file.
+    failed = []
     try:
         from gpevo.uspexkit.core import lib as write_reaxff_lib
         write_reaxff_lib(jsonfile=dst,
@@ -687,7 +694,17 @@ def sync_ffield_json(ORG):
     except Exception as exc:
         console_print(f"  GP ffield sync: could not convert ffield.json to "
                       f"reaxff_nn.lib ({exc}); start-up continues")
-        return "synced-lib-error"
+        failed.append("lib")
+    try:
+        from gpevo.uspexkit.core import ffield as write_reaxff_ffield
+        write_reaxff_ffield(jsonfile=dst,
+                            ffieldfile=os.path.join(specific_dir, "ffield"))
+    except Exception as exc:
+        console_print(f"  GP ffield sync: could not convert ffield.json to "
+                      f"LAMMPS ffield ({exc}); start-up continues")
+        failed.append("ffield")
+    if failed:
+        return "synced-" + "-".join(failed) + "-error"
     return "synced"
 
 
