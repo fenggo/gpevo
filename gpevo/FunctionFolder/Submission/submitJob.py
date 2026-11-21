@@ -48,7 +48,7 @@ def _code_exec_line(ORG, code, step):
                 f"--data={ORG.gpData} --den={ORG.gpDen} --u={ORG.gpU} "
                 f"--f={gp_feature(ORG)} "
                 f"--k={ORG.gpK} --mode={ORG.gpMode} --optype={ORG.optType} "
-                f"--backend={getattr(ORG, 'gpBackend', 'sklearn')} "
+                f"--backend={getattr(ORG, 'gpBackend', 'gpytorch')} "
                 f"--iter={getattr(ORG, 'gpTrainingIter', 200)} "
                 f"--lr={getattr(ORG, 'gpLr', 0.1)} "
                 f"--res-folder={getattr(ORG, 'resFolder', '') or ''}")

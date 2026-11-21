@@ -21,8 +21,9 @@ The refit honours INPUT.txt's ``gpbackend`` / ``gpiter`` / ``gplr`` -- the same
 options ``gp_ml.parse_gp_params`` passes to ``gp()`` and ``pred()`` -- so the
 holdout score measures the surrogate the production crystal-prediction loop
 actually uses.  The backend is printed in the report header.  If ``gpytorch``
-is selected but not installed the command fails loudly rather than silently
-scoring sklearn.
+    is selected but not installed the command fails loudly rather than silently
+    scoring sklearn.  GPyTorch is now the default when INPUT.txt has no
+    ``gpbackend``; set ``gpbackend : sklearn`` for MATLAB-parity runs.
 
 Usage::
 
@@ -153,7 +154,7 @@ def _read_input(path):
     parser = InputParser(inp)
 
     raw_backend = parser.option("gpbackend")
-    backend = str(raw_backend).lower() if raw_backend else "sklearn"
+    backend = str(raw_backend).lower() if raw_backend else "gpytorch"
     if backend not in ("sklearn", "gpytorch"):
         raise RuntimeError(
             f"unknown gpbackend '{raw_backend}' in {inp}; "
@@ -171,11 +172,11 @@ def _read_input(path):
                "learning_rate": learning_rate}
     if backend == "gpytorch" and not _gpytorch_is_installed():
         raise RuntimeError(
-            "INPUT.txt selects 'gpytorch : gpbackend' but gpytorch is not "
-            "installed; install it with `pip install gpytorch` (or "
-            "`pip install gpevo[gpytorch]`). Refusing to fall back to sklearn "
-            "silently: the holdout test would then score a model the "
-            "production gp() never uses.")
+            "GP backend 'gpytorch' (explicit or default) selected but gpytorch "
+            "is not installed; install it with `pip install gpytorch` (or "
+            "`pip install gpevo[gpytorch]`), or set 'gpbackend : sklearn' in "
+            "INPUT.txt. Refusing to fall back to sklearn silently: the holdout "
+            "test would then score a model the production gp() never uses.")
     return data_dir, options
 
 

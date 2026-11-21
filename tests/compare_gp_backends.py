@@ -19,7 +19,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 BASE = Path(__file__).resolve().parent
-SK = BASE / "results1"          # scikit-learn backend (default)
+SK = BASE / "results1"          # scikit-learn backend (legacy / opt-in)
 GP = BASE / "results2"          # GPyTorch backend
 OUT = BASE
 

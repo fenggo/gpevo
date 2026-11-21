@@ -8,10 +8,11 @@ on the compute node::
 
     python -m gpevo.uspexkit.cli gp --n=24 --data=data22 --den=1.8 \
         --u=0.03 --f=1 --k=1 --mode=ei --optype=11 \
-        --backend=sklearn --iter=200 --lr=0.1
+        --backend=gpytorch --iter=200 --lr=0.1
 
 The argument set mirrors the ``gp`` subcommand of the upstream uspexkit CLI,
-with ``--backend/--iter/--lr`` added for the opt-in GPyTorch training backend.
+with ``--backend/--iter/--lr`` for the GPyTorch training backend (now the
+default; pass ``--backend=sklearn`` for MATLAB-parity runs).
 """
 from __future__ import annotations
 
@@ -56,9 +57,10 @@ def _build_parser():
                       help="optType 1: energy, 11: density")
     p_gp.add_argument("--id", type=int, default=None,
                       help="crystal global ID (bodyCount+1) from submitJob")
-    p_gp.add_argument("--backend", default="sklearn",
+    p_gp.add_argument("--backend", default="gpytorch",
                       choices=("sklearn", "gpytorch"),
-                      help="GP training backend (default: sklearn)")
+                      help="GP training backend (default: gpytorch; "
+                           "use sklearn for MATLAB parity)")
     p_gp.add_argument("--iter", dest="training_iter", type=int, default=200,
                       help="max L-BFGS iterations per restart (gpytorch)")
     p_gp.add_argument("--lr", dest="learning_rate", type=float, default=0.1,

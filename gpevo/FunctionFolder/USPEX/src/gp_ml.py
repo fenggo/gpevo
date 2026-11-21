@@ -251,15 +251,15 @@ def _ncpu(ORG):
 
 
 def _gp_backend(ORG):
-    """GP training backend of INPUT.txt (``gpbackend``); sklearn by default."""
-    return str(_opt(ORG, "gpBackend", "sklearn")).lower()
+    """GP training backend of INPUT.txt (``gpbackend``); gpytorch by default."""
+    return str(_opt(ORG, "gpBackend", "gpytorch")).lower()
 
 
 def _backend_ready(backend):
     """Fail fast when gpytorch is selected but not installed.
 
     ``_call`` swallows exceptions raised inside uspexkit, so a missing backend
-    has to be caught *before* it -- otherwise a ``gpbackend : gpytorch`` run
+    has to be caught *before* it -- otherwise a gpytorch run (now the default)
     would silently produce sklearn results under the gpytorch setting.
     """
     if backend != "gpytorch":
@@ -267,7 +267,7 @@ def _backend_ready(backend):
     import importlib.util
     if importlib.util.find_spec("gpytorch") is not None:
         return True
-    console_print("  ERROR: gpbackend : gpytorch selected but gpytorch is not installed;")
+    console_print("  ERROR: GP backend gpytorch (explicit or default) but gpytorch is not installed;")
     console_print("         install it with `pip install gpytorch` (or `pip install gpevo[gpytorch]`).")
     console_print("         GP step skipped; NOT falling back to sklearn silently.")
     return False

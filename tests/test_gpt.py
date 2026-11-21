@@ -147,7 +147,7 @@ def test_gpt_forwards_default_gp_options(run_dir, monkeypatch):
     gpt_module.gpt(path=root, n=3, seed=0, plot=False)
 
     assert captured["options"] == {
-        "backend": "sklearn", "training_iter": 200, "learning_rate": 0.1}
+        "backend": "gpytorch", "training_iter": 200, "learning_rate": 0.1}
 
 
 def test_gpt_honours_gpbackend_from_input(run_dir, monkeypatch, capsys):
@@ -156,7 +156,7 @@ def test_gpt_honours_gpbackend_from_input(run_dir, monkeypatch, capsys):
     root, _data, _mlp, _dft = run_dir
     with open(os.path.join(root, "INPUT.txt"), "w") as fd:
         fd.write("data : data\ngpytorch : gpbackend\n50 : gpiter\n0.05 : gplr\n")
-    # gpytorch is an opt-in extra; pretend it is installed so we can assert
+    # gpytorch is an optional install; pretend it is present so we can assert
     # the options are forwarded without importing torch.
     monkeypatch.setattr(gpt_module, "_gpytorch_is_installed", lambda: True)
     captured = _stub_loader(monkeypatch, gpt_module, {})

@@ -1,4 +1,4 @@
-"""Opt-in GPyTorch training backend: INPUT.txt wiring, routing and caches.
+"""GP training backend (GPyTorch default): INPUT wiring, routing and caches.
 
 These tests need no GULP/SIESTA and (apart from the importorskip group) no
 gpytorch -- the routing tests monkeypatch the model constructor, exactly like
@@ -69,23 +69,28 @@ def test_backend_options_parsed_from_input(tmp_path):
     assert params["learning_rate"] == 0.05
 
 
-def test_backend_options_default_to_sklearn(tmp_path):
+def test_backend_options_default_to_gpytorch(tmp_path):
     org = _org_from_input(tmp_path, "1 : gp\n")
     params = gp_ml.parse_gp_params(org)
 
-    assert org.gpBackend == "sklearn"
+    assert org.gpBackend == "gpytorch"
     assert org.gpTrainingIter == 200
     assert org.gpLr == 0.1
-    assert params["backend"] == "sklearn"
+    assert params["backend"] == "gpytorch"
     assert params["training_iter"] == 200
     assert params["learning_rate"] == 0.1
 
 
-def test_unknown_backend_falls_back_to_sklearn(tmp_path, capsys):
-    org = _org_from_input(tmp_path, "1 : gp\nfoobar : gpbackend\n")
-    assert org.gpBackend == "sklearn"
-    assert "unknown gpbackend" in capsys.readouterr().out
+def test_explicit_sklearn_backend_is_honoured(tmp_path):
+    org = _org_from_input(tmp_path, "1 : gp\nsklearn : gpbackend\n")
     assert gp_ml.parse_gp_params(org)["backend"] == "sklearn"
+
+
+def test_unknown_backend_falls_back_to_gpytorch(tmp_path, capsys):
+    org = _org_from_input(tmp_path, "1 : gp\nfoobar : gpbackend\n")
+    assert org.gpBackend == "gpytorch"
+    assert "unknown gpbackend" in capsys.readouterr().out
+    assert gp_ml.parse_gp_params(org)["backend"] == "gpytorch"
 
 
 def test_run_gp_passes_backend_options(monkeypatch):
@@ -168,11 +173,12 @@ def test_load_gaussian_process_dispatches_cores(monkeypatch, tmp_path):
     assert len(seen) == 2
 
 
-def test_default_backend_still_uses_sklearn_tag(monkeypatch, tmp_path):
+def test_explicit_sklearn_backend_uses_sklearn_tag(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(core, "GaussianProcessRegressor", _FakeSklearnGPR)
 
-    core._load_or_fit_gpr("d.pkl", np.zeros((2, 2)), np.zeros(2), None)
+    core._load_or_fit_gpr("d.pkl", np.zeros((2, 2)), np.zeros(2), None,
+                          backend="sklearn")
     with open("d.pkl", "rb") as fp:
         blob = pickle.load(fp)
     assert blob["version"] == core._KERNEL_VERSION == 4

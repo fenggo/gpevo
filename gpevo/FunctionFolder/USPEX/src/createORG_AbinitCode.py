@@ -267,7 +267,7 @@ def createORG_AbinitCode(inputFile):
         else:
             from gpevo.log_utils import console_print
             console_print(f"  Warning: unknown gpbackend '{raw}', "
-                          "falling back to sklearn")
+                          "falling back to gpytorch")
     raw = p.option("gpiter")
     if raw is not None:
         try:

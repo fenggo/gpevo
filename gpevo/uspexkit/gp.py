@@ -1,7 +1,8 @@
 """Gaussian Process Regression via GPyTorch — sklearn-compatible wrapper.
 
-Vendored from ``~/uspexkit/uspexkit/gp.py`` for the opt-in ``gpbackend : gpytorch``
-INPUT.txt option.  It keeps the API the rest of uspexkit relies on:
+Vendored from ``~/uspexkit/uspexkit/gp.py`` as the default training backend
+(``gpbackend : gpytorch``; ``gpbackend : sklearn`` selects the legacy path).
+It keeps the API the rest of uspexkit relies on:
 ``fit()``, ``predict(return_std=True)``, ``kernel_``,
 ``log_marginal_likelihood()`` and pickle serialization.
 
@@ -18,15 +19,15 @@ which maps to
 
 with observation noise handled by a ``GaussianLikelihood``.  ``core`` selects
 between the Matern (density) and RBF (energy) variants so the two surrogate
-models keep the same kernel families as the default sklearn backend.
+models keep the same kernel families as the sklearn backend.
 
 Initial hyperparameters, their bounds and the noise constraint are read from
 the sklearn kernel passed in, so edits to ``core.py``'s kernel carry over to
 this backend.  DotProduct's ``sigma_0`` has no counterpart in gpytorch's
 LinearKernel and is deliberately not mapped.
 
-Importing this module never imports torch/gpytorch into the sklearn hot path:
-``core.py`` imports ``GPyTorchRegressor`` lazily, inside the gpytorch branch.
+``core.py`` imports ``GPyTorchRegressor`` lazily, so the explicit sklearn path
+never pays for a torch/gpytorch import.
 """
 from __future__ import annotations
 

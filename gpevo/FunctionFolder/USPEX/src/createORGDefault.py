@@ -69,7 +69,7 @@ def createORGDefault():
     ORG.gpMode = "ei"       # ei | random | uncertainty
     ORG.gpNboot = 2         # structures labelled to seed an empty training set
     ORG.gpExplore = 1       # 0 drops the sigma*phi(Z) term of EI: no exploration
-    ORG.gpBackend = "sklearn"   # sklearn | gpytorch (opt-in GPyTorch backend)
+    ORG.gpBackend = "gpytorch"  # gpytorch (default) | sklearn (MATLAB parity)
     ORG.gpTrainingIter = 200    # max L-BFGS iterations per restart (gpytorch)
     ORG.gpLr = 0.1              # L-BFGS learning rate (gpytorch)
     # optType 12 with `1 : gp`: weight on (energy - baseline)/factor and an

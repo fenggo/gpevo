@@ -138,7 +138,7 @@ ei        : mode          % ei | random | uncertainty
 2         : nboot         % structures labelled in the first batch when the training set is empty (default 2, must be ≥2)
 1         : cache         % 1 (default) = pred reuses the 10-D feature already computed in the GP step; 0 = recompute per crystal
 1         : explore       % 1 (default) = full EI; 0 = drop the σ·φ(Z) term and rank by improvement alone
-sklearn   : gpbackend     % GP training backend: sklearn (default) | gpytorch (opt-in)
+gpytorch  : gpbackend     % GP training backend: gpytorch (default) | sklearn (MATLAB parity)
 200       : gpiter        % max L-BFGS iterations per restart (gpytorch only)
 0.1       : gplr          % L-BFGS learning rate (gpytorch only)
 0.6       : w12           % optType 12 + gp: weight on (GP energy - eref12)/factor
@@ -155,7 +155,7 @@ for audit. The default 100 is deliberately far above the OOD cutoff
 `RESIDUAL_CUT=10` and the normal residual range 0.3–3; raising it disables the
 screen in practice, lowering it risks false positives.
 
-`gpbackend` / `gpiter` / `gplr` select the opt-in GPyTorch training backend (`pip install gpevo[gpytorch]`). With the default `sklearn` backend nothing changes. GPyTorch is a **different model** (LinearKernel / RBFKernel parameterisation, L-BFGS on the exact marginal log likelihood, GaussianLikelihood noise), so its OUTPUT.txt values are not byte-for-byte comparable with the sklearn/MATLAB parity run, and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and no longer needs an external uspexkit install.
+`gpbackend` / `gpiter` / `gplr` select the training backend: GPyTorch is the **default** (`pip install gpevo[gpytorch]`), set `gpbackend : sklearn` for MATLAB character-for-character parity or if GPyTorch is unavailable. GPyTorch is a **different model** (LinearKernel / RBFKernel parameterisation, L-BFGS on the exact marginal log likelihood, GaussianLikelihood noise), so its OUTPUT.txt values are not byte-for-byte comparable with the sklearn/MATLAB parity run, and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and no longer needs an external uspexkit install.
 
 #### `explore : 0` — turning off EI's exploration term
 
@@ -234,7 +234,7 @@ Each generation also prints a learning-curve line — **this line is the evidenc
 
 When nothing grows, it also says which gate blocked it (`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`). The usual cause is that the reference method cannot run: labels depend on `siesta` (`mpirun`) + `<homePath>/Specific/*.psf`, and a missing one triggers an early warning at startup. With `1 : gpplot`, every generation also draws `results*/gp_gen*.png` (four panels: population distribution / exploration map / predicted vs adopted values / extrapolation check); this figure is off by default.
 
-> The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), vendored into `gpevo/uspexkit/` and called as an in-process API; changing the kernel means editing the vendored `core.py`. The default `sklearn` backend is the one used for MATLAB character-for-character parity. With `gpbackend : gpytorch` an opt-in GPyTorch model is trained instead — different kernel parameterisation and optimiser, so its numbers are not directly comparable and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and needs no external uspexkit install.
+> The GP kernel comes from [uspexkit](https://gitee.com/fenggo/uspexkit) (sources under `~/uspexkit`), vendored into `gpevo/uspexkit/` and called as an in-process API; changing the kernel means editing the vendored `core.py`. The default backend is now GPyTorch; set `gpbackend : sklearn` for the model used in MATLAB character-for-character parity. GPyTorch uses a different kernel parameterisation and optimiser, so its numbers are not directly comparable and the learning curve reports `LOO RMSE: n/a`. The scheduler command is self-contained (`python -m gpevo.uspexkit.cli gp ...`) and needs no external uspexkit install.
 
 ### swarm operator (optional)
 

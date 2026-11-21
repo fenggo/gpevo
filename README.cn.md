@@ -136,14 +136,14 @@ ei        : mode          % ei | random | uncertainty
 2         : nboot         % 训练集为空时首批打标签的结构数（默认 2，需 ≥2）
 1         : cache         % 1（默认）= pred 复用 GP 步已算出的 10 维特征；0 = 每个晶体重算
 1         : explore       % 1（默认）= 完整 EI；0 = 去掉 σ·φ(Z) 项，只按提升量排序
-sklearn   : gpbackend     % GP 训练后端：sklearn（默认）| gpytorch（可选）
+gpytorch  : gpbackend     % GP 训练后端：gpytorch（默认）| sklearn（MATLAB 对拍用）
 200       : gpiter        % 每次重启的 L-BFGS 最大迭代数（仅 gpytorch）
 0.1       : gplr          % L-BFGS 学习率（仅 gpytorch）
 0.6       : w12           % optType 12 + gp：相对能量项 (GP能量 - eref12)/factor 的权重
 -28081    : eref12        % optType 12 能量基线（默认取 <data>/feature.csv 里 etot 的中位数）
 ```
 
-`gpbackend` / `gpiter` / `gplr` 控制可选的 GPyTorch 训练后端（`pip install gpevo[gpytorch]`）。默认 `sklearn` 时行为完全不变。GPyTorch 是**另一套模型**（LinearKernel / RBFKernel 参数化、在精确边际似然上做 L-BFGS、GaussianLikelihood 噪声），其 OUTPUT.txt 数值与 sklearn/MATLAB 对拍运行不逐字节可比，学习曲线会打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不再依赖外部安装的 uspexkit。
+`gpbackend` / `gpiter` / `gplr` 控制训练后端：现在**默认 GPyTorch**（`pip install gpevo[gpytorch]`）；设 `gpbackend : sklearn` 可切回 MATLAB 字符级对拍用的那一套，或在未安装 GPyTorch 时使用。GPyTorch 是**另一套模型**（LinearKernel / RBFKernel 参数化、在精确边际似然上做 L-BFGS、GaussianLikelihood 噪声），其 OUTPUT.txt 数值与 sklearn/MATLAB 对拍运行不逐字节可比，学习曲线会打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不再依赖外部安装的 uspexkit。
 
 #### `explore : 0` —— 关掉 EI 的探索项
 
@@ -222,7 +222,7 @@ optType 12 需要特别注意：GP 的"能量"是 `feature.csv` 里的 **DFT 总
 
 没长出来时也会说明卡在哪一道门（`No crystals above…` / `density threshold gate` / `calc failed` / `training set is still N row(s)`）。常见原因是参考方法跑不起来：标签靠 `siesta`（`mpirun`）+ `<homePath>/Specific/*.psf`，缺任一项启动时会提前告警。写 `1 : gpplot` 后每代画图 `results*/gp_gen*.png`（种群分布 / 探索地图 / 预测 vs 采用值 / 外推检查四面板），默认关闭。
 
-> GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），已 vendored 到 `gpevo/uspexkit/` 并以进程内 API 方式调用；改内核只需编辑仓库内这份 `core.py`。默认 `sklearn` 后端是 MATLAB 字符级对拍用的那一套。设 `gpbackend : gpytorch` 时改用可选的 GPyTorch 模型——核参数化与优化器都不同，数值不可直接比较，学习曲线打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不需要外部安装 uspexkit。
+> GP 内核来自 [uspexkit](https://gitee.com/fenggo/uspexkit)（源码在 `~/uspexkit`），已 vendored 到 `gpevo/uspexkit/` 并以进程内 API 方式调用；改内核只需编辑仓库内这份 `core.py`。现在默认后端是 GPyTorch；设 `gpbackend : sklearn` 可切回 MATLAB 字符级对拍用的那一套。GPyTorch 的核参数化与优化器都不同，数值不可直接比较，学习曲线打印 `LOO RMSE: n/a`。scheduler 命令行已自包含（`python -m gpevo.uspexkit.cli gp ...`），不需要外部安装 uspexkit。
 
 ### swarm 算子（可选）
 

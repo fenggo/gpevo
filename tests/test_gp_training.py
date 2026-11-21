@@ -425,7 +425,9 @@ def test_loo_rmses_reads_the_models_uspexkit_cached(tmp_path):
     previous = os.getcwd()
     try:
         os.chdir(data_dir)
-        core.load_gaussian_process(features, density, energy)
+        # LOO RMSE needs the sklearn Cholesky factor / alpha_; fit explicitly
+        # with sklearn since gpytorch is now the default backend.
+        core.load_gaussian_process(features, density, energy, backend="sklearn")
     finally:
         os.chdir(previous)
 

@@ -183,7 +183,7 @@ def get_nmol(atoms):
 
 
 def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,pop=100,ref='results1',id_=None,k=1,mode='ei',optype=11,
-       backend="sklearn",training_iter=200,learning_rate=0.1,log_dir=None):
+       backend="gpytorch",training_iter=200,learning_rate=0.1,log_dir=None):
     ''' Gaussian Process '''
     write_input(inp='inp-grad',keyword='grad conv qiterative verb')
     run_gulp(n=n,inp='inp-grad')
@@ -585,7 +585,7 @@ def get_gulp_energy(atoms, ncpu=8,o=True):
 # c0d1f5f had used v3 to force a refit in the *opposite* direction (the
 # multithreaded fit then produced a degenerate kernel and sd==0).
 _KERNEL_VERSION = 4
-# Cache tag for the opt-in GPyTorch backend.  Keeping the sklearn tag on a
+# Cache tag for the GPyTorch backend.  Keeping the sklearn tag on a
 # separate numbering scheme means switching backends always refits, without
 # invalidating existing sklearn caches.
 # v2: the likelihood noise constraint became an Interval (matching sklearn's
@@ -595,13 +595,13 @@ _KERNEL_VERSION = 4
 _GPYTORCH_VERSION = "gpytorch-2"
 
 
-def _load_or_fit_gpr(path, X, y, kernel, backend="sklearn", core="matern",
+def _load_or_fit_gpr(path, X, y, kernel, backend="gpytorch", core="matern",
                      training_iter=200, learning_rate=0.1):
     """Fit a GPR with `kernel`, caching it under a backend-specific version.
 
     A cache entry written by an older revision, by the other backend, or a bare
     model pickle from before versioning is retrained and overwritten.  The
-    default (sklearn) path keeps the original construction byte-for-byte.
+    sklearn path keeps the original construction byte-for-byte.
     """
     version = _KERNEL_VERSION if backend == "sklearn" else _GPYTORCH_VERSION
     if exists(path):
@@ -689,7 +689,7 @@ def _gp_predict(gpr, X, return_std=True):
     return gpr.predict(X, return_std=return_std)
 
 
-def load_gaussian_process(X, y, y_eng, backend="sklearn",
+def load_gaussian_process(X, y, y_eng, backend="gpytorch",
                           training_iter=200, learning_rate=0.1,
                           log_dir=None):
     length_scale = [0.1 for i in range(X.shape[1])]
@@ -756,7 +756,7 @@ def load_gaussian_process(X, y, y_eng, backend="sklearn",
 
 def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
          c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None,
-         backend="sklearn",training_iter=200,learning_rate=0.1,log_dir=None):
+         backend="gpytorch",training_iter=200,learning_rate=0.1,log_dir=None):
     """
     Predict density and energy using Gaussian Process.
 
