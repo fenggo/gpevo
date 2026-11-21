@@ -13,7 +13,6 @@ from sklearn.gaussian_process.kernels import (RBF,DotProduct, WhiteKernel,
                                               Matern,
                                               ExpSineSquared)
 from sklearn.neural_network import MLPRegressor
-from sklearn.ensemble import RandomForestRegressor
 from threadpoolctl import threadpool_limits
 # from ase import build
 from ase.io import read,write
@@ -224,7 +223,6 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     y      = data_[:,-1]
     y_eng  = data_[:,1]
 
-    d_scaler= np.mean(y)/np.mean(data[:,-1])
     e_mean = np.mean(data[:,1])
     e_scaler= e_mean - np.mean(y_eng)
 
@@ -238,26 +236,21 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
     gpr_energy, gpr_density = load_gaussian_process(
         X, y, y_eng, backend=backend, training_iter=training_iter,
         learning_rate=learning_rate, log_dir=log_dir)
-    rfr_density = load_rfr(X, y)
     if not exists('gp.csv'):
         with open('gp.csv','w') as fd:
-             print(',   index,          residual,        density_min,         density_rf,   density_gp,'
+             print(',   index,          residual,        density_min,         density_gp,'
                 '          uncertainty,           energy_min,       eng_pred,        uncertainty_eng,'
                 '      density_gp_updated,  uncertainty_updated',file=fd)
 
     mean_prediction, std_prediction = _gp_predict(gpr_density, X_)
     mean_eng_pred, std_eng_pred = _gp_predict(gpr_energy, X_)
-    density_rf = rfr_density.predict(X_)
     # print('95% confidence interval: \n', 1.96 * std_prediction)
-    
+
+    # The GP mean is always used.  A large residual no longer falls back to a
+    # RandomForest guess: out-of-distribution structures are rejected by
+    # mark_fake_residual (INPUT fakerescut), which sets fitness to 100000 so
+    # USPEX discards them.  See gpevo/FunctionFolder/USPEX/src/residual_check.py.
     density_= mean_prediction[0] # data_[ind[0][im],-1]
-    # if ((density_>np.max(y)*1.1 and (density_/density>1.5 or  density/density_>1.5)) or 
-    #     (density_>np.max(y) and res[imin]>RESIDUAL_CUT) ):
-    if res[imin] > RESIDUAL_CUT:
-       if density_rf[0]/density>1.5 or  density/density_rf[0]>1.5:
-          density_ = density*d_scaler
-       else:
-          density_ = density_rf[0]
 
     # 晶体全局 ID：优先使用 USPEX submitJob 下发的 bodyCount+1（--id）；
     # 未提供时回退到 Individuals 最后一行（兼容手动运行 uspexkit gp 的场景）
@@ -283,9 +276,9 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
        if data_pred.size > 0:
           if  data_pred.ndim==2:
               if data_pred.shape[0]>pop:
-                 U         = data_pred[:,6]
-                 R         = data_pred[:,2]
-                 Density   = np.where(np.logical_and(U<0.2,R<RESIDUAL_CUT),data_pred[:,5],data_pred[:,4])
+                 # Only the GP density column remains; the old U/R-gated
+                 # np.where that mixed in a RandomForest density is gone.
+                 Density   = data_pred[:,4]
                  imax      = np.argmax(Density)
                  # with open('gp.log','a') as fg:
                  #     print(data_pred.ndim,file=fg)
@@ -310,9 +303,8 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
                        energy = atoms_opt.get_potential_energy()
                        # with open('refit','w') as fr:
                        #      print(1,file=fr)
-                       subprocess.call("rm gpr_density.pkl gpr_energy.pkl", shell=True) 
-                       subprocess.call("rm rfr.pkl", shell=True) 
-                              
+                       subprocess.call("rm gpr_density.pkl gpr_energy.pkl", shell=True)
+
                        # add structure to database
                        # chdir(data_dir)
                        with open(f"../{dat}/feature_mlp.csv", "a") as fd:
@@ -362,7 +354,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
        with open('gp.csv','a') as fd:
            # id_ = fd.tell()
            print(id_,',',imin,',',res[imin],',',data_[imin][-1],',',
-               density_rf[0],',',mean_prediction[0],',',
+               mean_prediction[0],',',
                1.96*std_prediction[0],',',data_[imin][1],',',mean_eng_pred[0],',',1.96*std_eng_pred[0],
                ',', '',',','',
                file=fd)
@@ -370,7 +362,7 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
        # DFT 已完成: 只写一行, 末尾两列为更新后后验均值与 ±1.96σ
        with open('gp.csv','a') as fd:
            print(id_,',',imin,',',res[imin],',',data_[imin][-1],',',
-               density_rf[0],',',mean_prediction[0],',',
+               mean_prediction[0],',',
                1.96*std_prediction[0],',',data_[imin][1],',',mean_eng_pred[0],',',1.96*std_eng_pred[0],
                ',', f'{density_updated:.8f}',',',f'{uncert_updated:.8f}',
                file=fd)
@@ -393,7 +385,6 @@ def gp(tolerance=0.005,step=1000,n=1,b=1.5,u=0.04,f=1,dat='data',dft=0,den=1.82,
         'nearest': int(imin),
         'residual': float(res[imin]),
         'density_min': float(data_[imin][-1]),
-        'density_rf': float(density_rf[0]),
         'density_gp': float(mean_prediction[0]),
         'uncertainty': float(1.96*std_prediction[0]),
         'energy_min': float(data_[imin][1]),
@@ -763,18 +754,6 @@ def load_gaussian_process(X, y, y_eng, backend="sklearn",
 #     mlp.fit(X, y)
 #     return mlp
 
-def load_rfr(X, y):
-    if not exists("rfr.pkl"):
-       rfr = RandomForestRegressor(random_state=37, n_estimators=300,
-                                min_weight_fraction_leaf=0.0, oob_score=True)
-       rfr.fit(X, y)
-       with open("rfr.pkl", "wb") as f:
-            pickle.dump(rfr, f)
-    else:
-       with open("rfr.pkl", "rb") as f:
-            rfr = pickle.load(f)
-    return rfr
-
 # ──────────────────────────────────────────────
 #  pred — 高斯过程预测
 # ──────────────────────────────────────────────
@@ -783,7 +762,7 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
          c='nn',step=300, ncpu=8, dat="data", tolerance=0.001, features=None,
          backend="sklearn",training_iter=200,learning_rate=0.1,log_dir=None):
     """
-    Predict density and energy using Gaussian Process + MLP + RandomForest.
+    Predict density and energy using Gaussian Process.
 
     Args:
         t: trajectory file name
@@ -825,7 +804,7 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     root_dir = getcwd()
     if not exists("density_predict.log"):
         with open("density_predict.log", "w") as fd:
-            print("# Crystal_id Residual Density_mlp Density_rf Density_gp std_den Energy std_eng", file=fd)
+            print("# Crystal_id Residual Density_mlp Density_gp std_den Energy std_eng", file=fd)
 
     masses = np.sum(images[0].get_masses())
     # Collected per crystal and returned, so callers (gpevo) can store the
@@ -858,7 +837,6 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
     gpr_energy, gpr_density = load_gaussian_process(
         X, y, y_eng, backend=backend, training_iter=training_iter,
         learning_rate=learning_rate, log_dir=log_dir or root_dir)
-    rfr = load_rfr(X, y)
     chdir(root_dir)
 
     for s in ids_list:
@@ -914,24 +892,19 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
         density_pred = density_pred[0]
         std_den_pred = std_den_pred[0]
         std_eng_pred = std_eng_pred[0]
-        density_rf   = rfr.predict(X_)[0]
-        # density_mlp  = mlp.predict(X_)[0]
 
         # if f == 1:
         print(f"{s:5d} -- {imin:5d} res: {res_}  "
-              f"rf: {density_rf:7.4f}  "
               f"gp(den): {density_pred:7.4f} uncert: {std_den_pred:7.4f}  "
               f"gp(eng): {energy_pred:7.4f} uncert: {std_eng_pred:7.4f}" )
         # else:
-        #     print(f"{s:5d} rf: {density_rf:9.4f} "
-        #           f"{feature[3]:9.4f} {feature[4]:9.4f} {feature[5]:9.4f} {feature[6]:9.4f} "
+        #     print(f"{s:5d} {feature[3]:9.4f} {feature[4]:9.4f} {feature[5]:9.4f} {feature[6]:9.4f} "
         #           f"gp: {density_pred:7.4f} uncert: {std_den_pred:7.4f}")
 
         chdir(root_dir)
         with open("density_predict.log", "a") as fd:
              print(f"{s:5d} {res_} "
                    f"{density:7.4f} "
-                   f"{density_rf:7.4f} "
                    f"{density_pred:7.4f} {std_den_pred:7.4f} "
                    f"{energy_pred:7.4f} {std_eng_pred:7.4f} " ,file=fd)
 
@@ -943,7 +916,6 @@ def pred(t="Individuals.traj", g=None, gen=None, f=1, den=1.88, ids=None,x=-1,
             'id': int(s),
             'residual': residual,
             'density_mlp': float(density),
-            'density_rf': float(density_rf),
             'density_gp': float(density_pred),
             'std_den': float(std_den_pred),
             'uncertainty': float(1.96 * std_den_pred),

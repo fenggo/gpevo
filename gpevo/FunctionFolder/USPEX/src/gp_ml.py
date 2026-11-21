@@ -46,7 +46,7 @@ _EI_DEFAULTS = {"u": 0.04, "k": 1, "mode": "ei"}
 # ``s.sigma_gp`` is what the acquisition actually consumes.
 UNCERT_SCALE = 1.96
 
-_PKL_NAMES = ("gpr_density.pkl", "gpr_energy.pkl", "rfr.pkl")
+_PKL_NAMES = ("gpr_density.pkl", "gpr_energy.pkl")
 
 # Files uspexkit.gp() reads from ../<data> (see core.py:196-198).
 _DB_FILES = ("feature_mlp.csv", "feature.csv", "structures.traj")
@@ -318,9 +318,8 @@ def run_gp(ORG, cwd=None, id_=None):
 def apply_gp_metrics(s, result):
     """Store what ``uspexkit.gp()`` returned on one structure.
 
-    This replaces the old round-trip through CalcFold1/gp.csv: the same three
-    quantities that were read back from columns 3/6/7 (residual, density_gp,
-    uncertainty) are now taken straight from the return value.
+    This replaces the old round-trip through CalcFold1/gp.csv: the residual,
+    density and uncertainty are now taken straight from the return value.
     """
     if not isinstance(result, dict):
         return False
@@ -411,13 +410,13 @@ def apply_pred_metrics(s, entry):
 
 
 # Row layout shared by ``_metrics_row`` and ``_read_gp_csv`` (the gp.csv
-# columns of uspexkit core.py:223-224 with the leading id stripped):
-#   0 nearest, 1 residual, 2 density_min, 3 density_rf, 4 density_gp,
-#   5 sigma (posterior std), 6 energy_min, 7 energy_pred, 8 sigma_energy
+# columns written by uspexkit.gp(), with the leading id stripped):
+#   0 nearest, 1 residual, 2 density_min, 3 density_gp,
+#   4 sigma (posterior std), 5 energy_min, 6 energy_pred, 7 sigma_energy
 # Both readers convert the 1.96*std columns of gp.csv / gp() into sigma.
-_DEN_GP, _UNCERT = 4, 5
-_ENG_GP, _UNCERT_ENG = 7, 8
-_ROW_LEN = 9
+_DEN_GP, _UNCERT = 3, 4
+_ENG_GP, _UNCERT_ENG = 6, 7
+_ROW_LEN = 8
 
 
 # ─── optType 12: one convention for fitness, pred write-back and EI ───
@@ -522,7 +521,7 @@ def opt12_ei_components(row, factor, eref=None, weight=None, opt_sign=1.0):
     mu is the negative of the minimised fitness, sigma propagates the two
     GP uncertainties assuming independent predictions.  A row without a
     finite energy prediction (or without a baseline) degrades to the pure
-    density target, so old gp.csv files remain usable.
+    density target, so rows without an energy column remain usable.
     """
     density = float(row[_DEN_GP])
     sigma_d = float(row[_UNCERT])
@@ -548,7 +547,7 @@ def _to_sigma(uncertainty):
 
 
 def _metrics_row(s):
-    """Row layout of ``_read_gp_csv``, columns 5/8 are posterior sigma."""
+    """Row layout of ``_read_gp_csv``, columns 4/7 are posterior sigma."""
     sigma = _finite(getattr(s, "sigma_gp", None))
     if not math.isfinite(sigma):
         sigma = _to_sigma(getattr(s, "uq", None))
@@ -556,7 +555,7 @@ def _metrics_row(s):
     if not math.isfinite(sigma_eng):
         sigma_eng = _to_sigma(getattr(s, "uq_eng", None))
     return [float("nan"), _finite(getattr(s, "distance", None)), float("nan"),
-            float("nan"), _finite(getattr(s, "density_gp", None)),
+            _finite(getattr(s, "density_gp", None)),
             sigma, float("nan"),
             _finite(getattr(s, "energy_gp", None)),
             sigma_eng]
@@ -592,7 +591,7 @@ def parse_gp_params(ORG):
         "den": float(_opt(ORG, "gpDen", 0.0)),
         "f": gp_feature(ORG),
         # ``u`` is a floor on the REPORTED 1.96*std uncertainty (gp.csv
-        # column 6/10), not on the posterior std the EI formula uses.
+        # columns 5/8), not on the posterior std the EI formula uses.
         "u": float(_opt(ORG, "gpU", _EI_DEFAULTS["u"])),
         "k": int(_opt(ORG, "gpK", _EI_DEFAULTS["k"])),
         "mode": str(_opt(ORG, "gpMode", _EI_DEFAULTS["mode"])),
@@ -710,14 +709,14 @@ def is_gp_step(ORG, step):
 def _read_gp_csv(path):
     """Read CalcFold1/gp.csv into ``{crystal_id: row}`` (first row wins).
 
-    Columns (CalcFitness_310.m:183-189):
-    0 id, 1 nearest index, 2 residual, 3 density_min, 4 density_rf,
-    5 density_gp, 6 uncertainty, 7 energy_min, 8 energy_pred, 9 uncertainty_eng
+    Columns:
+    0 id, 1 nearest index, 2 residual, 3 density_min, 4 density_gp,
+    5 uncertainty, 6 energy_min, 7 energy_pred, 8 uncertainty_eng
 
     The id is stripped, so the stored row starts at the nearest index (see
-    ``_ROW_LEN``).  Columns 5/8 are converted from the stored 1.96*std to the
-    posterior std.  Short or unreadable cells become NaN: an old gp.csv whose
-    two last columns are still empty must not cost the whole row.
+    ``_ROW_LEN``).  The two uncertainty columns are converted from the stored
+    1.96*std to the posterior std.  Short or unreadable cells become NaN: an
+    old gp.csv whose two last columns are still empty must not cost the row.
     """
     table = {}
     try:
@@ -733,8 +732,8 @@ def _read_gp_csv(path):
                     continue
                 values = [_finite(value) for value in row[1:_ROW_LEN + 1]]
                 values += [float("nan")] * (_ROW_LEN - len(values))
-                # gp.csv stores 1.96*std in columns 6/10 (see header above);
-                # the table's sigma columns must hold the posterior std.
+                # gp.csv stores 1.96*std in the two uncertainty columns
+                # (stripped indices 4/7); convert to posterior std.
                 for col in (_UNCERT, _UNCERT_ENG):
                     if math.isfinite(values[col]):
                         values[col] /= UNCERT_SCALE
@@ -799,11 +798,11 @@ def _ei_target(params):
     """``(mu column, sigma column, name)`` of the quantity EI is computed on.
 
     optType 1 minimises the enthalpy, so the acquisition runs on the GP
-    energy prediction and on *its* uncertainty (gp.csv columns 8/9).
+    energy prediction and on *its* uncertainty (gp.csv columns 7/8).
     optType 12 optimises the combined fitness (relative energy - density),
     so its target is synthesised per row by ``opt12_ei_components``, not
     read from a single column.  All other optTypes keep the density
-    (columns 5/6), as the MATLAB reference does.
+    (columns 4/5), as the MATLAB reference does.
     """
     opt_type = int(params.get("optType", 11) or 11)
     if opt_type == 1:
