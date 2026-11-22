@@ -114,4 +114,17 @@ def mark_fake_residual(s, label="", cutoff=None, ORG=None) -> bool:
         f"{prefix}FAKE low-energy rejected: GP residual {value:.4g} > "
         f"{limit:g}; Enthalpies[-1]=100000"
     )
+    # Keep the rejected geometry for later force-field training; no physical
+    # energy is attached (Enthalpies[-1] is the 100000 failure sentinel).
+    # Import lazily: residual_check is imported early and the writer pulls in
+    # ASE.  At most one frame per structure, first reason wins.
+    try:
+        from gpevo.FunctionFolder.USPEX.src.WriteIndividualsTraj import (
+            append_rejected_traj)
+
+        append_rejected_traj(
+            s, "fake_residual",
+            generation=getattr(G.get("POP_STRUC"), "generation", 0))
+    except Exception:
+        pass
     return True

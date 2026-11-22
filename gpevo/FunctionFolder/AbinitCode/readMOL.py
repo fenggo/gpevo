@@ -189,4 +189,15 @@ def _check_molecules(s, maxdist=0.6, label=""):
             console_print(msg)
             if int(np.max(np.asarray(step, dtype=float))) >= 2:
                 s.Error = int(getattr(s, "Error", 0)) + 4
+            # Keep the damaged geometry for later force-field training.  The
+            # helper never raises and writes at most once per structure.
+            try:
+                from gpevo.FunctionFolder.USPEX.src.WriteIndividualsTraj import (
+                    append_rejected_traj)
+
+                append_rejected_traj(
+                    s, "molecule_damaged",
+                    generation=getattr(G.get("POP_STRUC"), "generation", 0))
+            except Exception:
+                pass
             break

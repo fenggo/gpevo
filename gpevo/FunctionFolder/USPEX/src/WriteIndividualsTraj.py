@@ -1,4 +1,10 @@
-"""Append every finished structure to ``resFolder/Individuals.traj``.
+"""Append finished and rejected structures to per-run trajectories.
+
+``resFolder/Individuals.traj`` holds one frame per finished structure (see
+below).  ``resFolder/rejected.traj`` holds the geometries the EA throws away
+-- damaged molecules (readMOL) and fake low-energy structures (GP residual
+screen) -- for later force-field training; those frames carry provenance only
+and no single-point energy.
 
 ``gatheredPOSCARS`` (and ``Individuals``) are plain text, so reading a run back
 for analysis needs a parser.  ``Individuals.traj`` is the ASE-readable twin of
@@ -39,6 +45,7 @@ import os
 import numpy as np
 
 from gpevo.log_utils import console_print
+from gpevo.runtime import G
 from gpevo.FunctionFolder.sys.Write_POSCAR import _symbol
 
 # Keys of the gp()/pred() result dict that are reported per structure; they are
@@ -169,4 +176,91 @@ def append_individuals_traj(res_folder, s, atom_type, generation=0):
     except Exception as exc:
         console_print(f"  Warning: cannot append to Individuals.traj: {exc}")
         return False
+    return True
+
+
+# Rejected structures (damaged molecules / fake low-energy) are kept in a
+# separate trajectory for later force-field training.  They share _atoms() and
+# the never-raise policy with Individuals.traj, but carry only geometry plus
+# provenance: the 100000 enthalpy sentinel is deliberately NOT attached as a
+# single-point energy (it is a failure marker, not a physical label).
+_REJECTED_FLAG = "rejectedTrajSaved"
+
+
+def append_rejected_traj(s, reason, generation=0):
+    """Append one rejected structure to ``resFolder/rejected.traj``.
+
+    Called from both rejection paths -- ``readMOL._check_molecules`` (damaged
+    molecule) and ``residual_check.mark_fake_residual`` (fake low-energy) --
+    once per structure.  A per-structure flag makes repeat calls no-ops, so a
+    structure damaged at several relaxation steps or rejected by both paths is
+    stored once; the first reason wins.
+
+    Args:
+        s:          population individual being rejected.
+        reason:     short provenance string, e.g. ``"molecule_damaged"`` or
+                    ``"fake_residual"``.
+        generation: generation number, stored in ``atoms.info``.
+
+    Returns True when a frame was written.  Like the other traj helper this
+    never raises: a bad geometry or an unwritable file only warns.
+    """
+    if getattr(s, _REJECTED_FLAG, False):
+        return False
+    ORG = G.get("ORG_STRUC")
+    if ORG is None:
+        return False
+    res_folder = (getattr(G.get("POP_STRUC"), "resFolder", None)
+                  or getattr(ORG, "resFolder", "") or ".")
+    # _check_molecules runs inside Reading()'s CalcFoldN chdir, so anchor a
+    # relative resFolder to the run home instead of the current directory.
+    if not os.path.isabs(res_folder):
+        home = getattr(ORG, "homePath", None)
+        if home:
+            res_folder = os.path.join(home, res_folder)
+    atom_type = list(getattr(ORG, "atomType", []))
+    generation = int(generation or getattr(G.get("POP_STRUC"), "generation", 0) or 0)
+    path = os.path.join(res_folder, "rejected.traj")
+    try:
+        atoms = _atoms(s, atom_type)
+    except Exception as exc:
+        console_print(f"  Warning: rejected.traj skipped structure "
+                      f"{getattr(s, 'Number', '?')}: {exc}")
+        return False
+
+    info = {"reason": str(reason), "generation": generation}
+    number = getattr(s, "Number", None)
+    try:
+        number = int(number)
+    except (TypeError, ValueError):
+        number = None
+    if number:
+        info["Number"] = number
+    marker = getattr(s, "moleculeCheck", None)
+    if marker is not None and str(marker).strip():
+        info["moleculeCheck"] = str(marker).strip()
+    for attr in ("residual", "distance"):
+        value = _num(getattr(s, attr, None))
+        if value is not None:
+            info[attr] = value
+    atoms.info.update(info)
+    # No SinglePointCalculator: Enthalpies[-1] is 100000 on a rejected
+    # structure, a failure sentinel that must not become a training label.
+
+    try:
+        from ase.io.trajectory import TrajectoryWriter
+
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        writer = TrajectoryWriter(path, mode="a")
+        try:
+            writer.write(atoms)
+        finally:
+            writer.close()
+    except ImportError:
+        console_print("  Warning: ASE is not installed, rejected.traj not written")
+        return False
+    except Exception as exc:
+        console_print(f"  Warning: cannot append to rejected.traj: {exc}")
+        return False
+    setattr(s, _REJECTED_FLAG, True)
     return True
