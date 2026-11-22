@@ -83,6 +83,11 @@ def _record(gen):
 
     record = AttrDict()
     record.gen = gen
+    # A real USPEX record carries Enthalpies -- that is how Start.py's
+    # _uspex_has_records tells it from Initialize.py's empty placeholder.
+    record.Enthalpies = [-1000.0 - gen]
+    record.Number = gen
+    record.numIons = [1]
     return record
 
 
@@ -281,3 +286,41 @@ def test_a_finished_run_does_not_restart(tmp_path, monkeypatch, capsys):
 
     assert "already finished" in capsys.readouterr().out
     assert not (tmp_path / "Current_POP.pkl").exists()
+
+
+# ---- a checkpoint holding only the empty placeholder is not a record -------
+
+def test_uspex_has_records_rejects_placeholder_only_checkpoint():
+    """Initialize.py's [{}] is non-empty but carries no structure record."""
+    from gpevo.FunctionFolder.USPEX.Start import _uspex_has_records
+    from gpevo.runtime import AttrDict
+
+    assert _uspex_has_records(None) is False
+    assert _uspex_has_records(_uspex([])) is False
+    assert _uspex_has_records(_uspex([AttrDict()])) is False
+    assert _uspex_has_records(_uspex([None])) is False
+    assert _uspex_has_records(_uspex([AttrDict(), _record(1)])) is True
+
+
+def test_placeholder_only_current_uspex_falls_back_to_snapshots(tmp_path):
+    """A restart after the loss must merge the older generations back in."""
+    from gpevo.runtime import AttrDict, safeload, safesave
+
+    from gpevo.FunctionFolder.USPEX.Start import _uspex_has_records, _restore_uspex_struc
+
+    _snapshots(tmp_path, ((1, [_record(1)] * 3),
+                          (2, [None, None, None, _record(2), _record(2)])))
+    # This is exactly what Start() finds on disk in the failing run: only the
+    # empty placeholder, saved before any structure was recorded.
+    placeholder = _uspex([AttrDict()])
+    safesave("Current_USPEX.pkl", placeholder)
+    on_disk = safeload("Current_USPEX.pkl")
+    assert not _uspex_has_records(on_disk)          # the bad old check was truthy
+
+    POP = AttrDict()
+    POP.resFolder = str(tmp_path / "results1")
+    POP.generation = 3
+    restored = _restore_uspex_struc(POP)
+    assert restored is not None
+    assert [r.gen for r in restored.POPULATION] == [1, 1, 1, 2, 2]
+    assert _uspex_has_records(restored)

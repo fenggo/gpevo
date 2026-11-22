@@ -192,6 +192,22 @@ def _uspex_snapshots(POP):
     return sorted(found)
 
 
+def _uspex_has_records(USPEX):
+    """True when a USPEX checkpoint holds at least one real structure record.
+
+    Initialize.py seeds POPULATION[0] with an empty AttrDict() placeholder.  A
+    checkpoint saved before any structure was recorded (or one saved after a
+    restart that reloaded only that placeholder) therefore has a *non-empty*
+    POPULATION that is nevertheless useless -- treating it as valid is what
+    let a restarted run lose its whole cumulative Individuals table.  A record
+    is real only if it carries the Enthalpies WriteIndividual reads.
+    """
+    if USPEX is None:
+        return False
+    return any(record is not None and hasattr(record, "Enthalpies")
+               for record in (getattr(USPEX, "POPULATION", None) or []))
+
+
 def _restore_uspex_struc(POP):
     """The cumulative record a restart has to continue from, or None.
 
@@ -286,8 +302,13 @@ def Start():
         USPEX = None
         if os.path.exists("Current_USPEX.pkl"):
             USPEX = safeload("Current_USPEX.pkl")
-        if USPEX is None or not getattr(USPEX, "POPULATION", None):
-            USPEX = _restore_uspex_struc(POP)
+        # A checkpoint holding only the empty Initialize.py placeholder is not
+        # a usable cumulative record: rebuild it from the per-generation
+        # snapshots so a restarted run does not lose every older generation.
+        if not _uspex_has_records(USPEX):
+            restored = _restore_uspex_struc(POP)
+            if restored is not None:
+                USPEX = restored
         if USPEX is not None:
             G["USPEX_STRUC"] = USPEX
         # Reprocess already-relaxed individuals from a finished checkpoint so

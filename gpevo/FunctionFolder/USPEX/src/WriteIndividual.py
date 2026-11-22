@@ -18,6 +18,12 @@ def _composition(num_ions):
 
 
 def _row(index, record):
+    # Initialize.py seeds POPULATION[0] with an empty AttrDict() placeholder,
+    # and structures rejected before they get a Number never replace it.  Such
+    # a record has no physical fields at all -- skip it instead of crashing the
+    # whole generation output on record.Enthalpies.
+    if not hasattr(record, "Enthalpies") or record.Enthalpies is None:
+        return ""
     num_ions = list(getattr(record, "numIons", []) or [])
     total = int(sum(int(v) for v in num_ions))
     enth = float(np.asarray(record.Enthalpies, dtype=float).ravel()[-1])
@@ -84,8 +90,10 @@ def WriteIndividual(resFolder, energyUnits=None):
             else:
                 fp.write(UNITS + "\n")
             for index, record in enumerate(population, start=1):
-                if record is None:
+                if record is None or not hasattr(record, "Enthalpies"):
                     continue
-                fp.write(_row(index, record) + "\n")
+                row = _row(index, record)
+                if row:
+                    fp.write(row + "\n")
     except OSError:
         return
