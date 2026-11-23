@@ -56,7 +56,7 @@ def update_USPEX_GENERATION(IND, fitness, type=1):
         if done_value > 0:
             number = int(getattr(POP.POPULATION[individual_index], "Number", 0) or 0)
             if 0 < number <= len(population) and population[number - 1] is not None:
-                population[number - 1].Fitness = float(fitness[position])
+                population[number - 1].Fitness = float(fitness[individual_index])     # origin position -> individual_index
 
     USPEX.GENERATION = generations
     G["USPEX_STRUC"] = USPEX
