@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import shutil
 
 import numpy as np
 import pytest
@@ -79,6 +80,18 @@ def test_predict_from_feature_returns_none_when_no_models(tmp_path):
                                      backend="sklearn") is None
 
 
+def test_predict_from_feature_prefers_calcfold1_models(tmp_path):
+    """gp() leaves its current models in CalcFold1; prefer them over data_dir."""
+    data_dir = str(tmp_path / "data")
+    fold_dir = str(tmp_path / "CalcFold1")
+    _write_models(data_dir, density=1.50, energy=-10.0)
+    _write_models(fold_dir, density=1.80, energy=-100.0)
+    result = core.predict_from_feature([1.0] * 10, data_dir,
+                                       backend="sklearn", home=str(tmp_path))
+    assert result["density_gp"] == pytest.approx(1.80)
+    assert result["energy_pred"] == pytest.approx(-100.0)
+
+
 # ── refresh_kept_best_gp_metrics ───────────────────────────────────────
 
 def test_refresh_updates_scalars_from_saved_feature(tmp_path):
@@ -120,6 +133,20 @@ def test_refresh_is_noop_when_no_cached_model(tmp_path):
     s = AttrDict(gp_feature=[1.0] * 10, density_gp=1.50)
     assert refresh_kept_best_gp_metrics(s, _org(data_dir)) is False
     assert s.density_gp == 1.50
+
+
+def test_refresh_uses_calcfold1_models_when_data_dir_has_none(tmp_path):
+    """Live runs keep the current models in CalcFold1, not in data_dir."""
+    data_dir = str(tmp_path / "data")
+    fold_dir = str(tmp_path / "CalcFold1")
+    os.makedirs(data_dir, exist_ok=True)
+    _write_models(fold_dir, density=1.77, energy=-99.0)
+    shutil.copy(os.path.join(fold_dir, "feature_mlp.csv"),
+                os.path.join(data_dir, "feature_mlp.csv"))
+    s = AttrDict(gp_feature=[1.0] * 10, density_gp=1.50, energy_gp=-80.0)
+    assert refresh_kept_best_gp_metrics(s, _org(data_dir)) is True
+    assert s.density_gp == pytest.approx(1.77)
+    assert s.energy_gp == pytest.approx(-99.0)
 
 
 def test_refresh_never_raises_on_malformed_model(tmp_path):

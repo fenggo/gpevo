@@ -421,10 +421,10 @@ def refresh_kept_best_gp_metrics(s, ORG):
         return False
     try:
         from gpevo.uspexkit.core import predict_from_feature
-        _, _, data_dir = gp_data_paths(ORG)
+        home, _, data_dir = gp_data_paths(ORG)
         params = parse_gp_params(ORG)
         result = predict_from_feature(feature, data_dir,
-                                      backend=params["backend"])
+                                      backend=params["backend"], home=home)
         if not isinstance(result, dict):
             return False
         s.density_gp = _finite(result.get("density_gp"))

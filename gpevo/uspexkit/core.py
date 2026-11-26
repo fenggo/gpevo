@@ -689,7 +689,7 @@ def _gp_predict(gpr, X, return_std=True):
     return gpr.predict(X, return_std=return_std)
 
 
-def predict_from_feature(feature, data_dir, backend="gpytorch"):
+def predict_from_feature(feature, data_dir, backend="gpytorch", home=None):
     """Predict density / energy from a saved feature using the current models.
 
     No geometry, no GULP/ReaxFF/DFT and no refit: just the StandardScaler that
@@ -698,24 +698,38 @@ def predict_from_feature(feature, data_dir, backend="gpytorch"):
     carried-over (kept-best) structure can have its fitness refreshed against
     a retrained model without recomputing its geometry-dependent feature.
 
+    ``gp()`` fits in the structure's CalcFold directory and leaves its cached
+    models there, while ``pred()`` writes them into ``data_dir``.  When
+    ``home`` is given, look in ``<home>/CalcFold1`` first (the model actually
+    used to score the current generation), then fall back to ``data_dir``.
+
     Returns a dict in the same shape as ``gp()``'s density/energy fields, or
     ``None`` when no version-matched cached model is available (the caller
     then keeps the structure's existing predictions).
     """
     version = _KERNEL_VERSION if backend == "sklearn" else _GPYTORCH_VERSION
-    models = {}
-    for name in ("gpr_density.pkl", "gpr_energy.pkl"):
-        path = os.path.join(data_dir, name)
-        if not exists(path):
-            return None
-        try:
-            with open(path, "rb") as f:
-                blob = pickle.load(f)
-        except Exception:
-            return None
-        if not isinstance(blob, dict) or blob.get("version") != version:
-            return None
-        models[name] = blob["model"]
+    model_dirs = [os.path.join(str(home), "CalcFold1")] if home else []
+    model_dirs.append(data_dir)
+    models = None
+    for model_dir in model_dirs:
+        candidate = {}
+        for name in ("gpr_density.pkl", "gpr_energy.pkl"):
+            path = os.path.join(model_dir, name)
+            if not exists(path):
+                break
+            try:
+                with open(path, "rb") as f:
+                    blob = pickle.load(f)
+            except Exception:
+                break
+            if not isinstance(blob, dict) or blob.get("version") != version:
+                break
+            candidate[name] = blob["model"]
+        if len(candidate) == 2:
+            models = candidate
+            break
+    if models is None:
+        return None
     try:
         data = np.loadtxt(os.path.join(data_dir, "feature_mlp.csv"),
                           delimiter=",", skiprows=1)
