@@ -689,6 +689,51 @@ def _gp_predict(gpr, X, return_std=True):
     return gpr.predict(X, return_std=return_std)
 
 
+def predict_from_feature(feature, data_dir, backend="gpytorch"):
+    """Predict density / energy from a saved feature using the current models.
+
+    No geometry, no GULP/ReaxFF/DFT and no refit: just the StandardScaler that
+    ``gp()``/``pred()`` fitted on ``feature_mlp.csv`` plus two cached GP
+    posteriors (``gpr_density.pkl`` / ``gpr_energy.pkl``).  This is how a
+    carried-over (kept-best) structure can have its fitness refreshed against
+    a retrained model without recomputing its geometry-dependent feature.
+
+    Returns a dict in the same shape as ``gp()``'s density/energy fields, or
+    ``None`` when no version-matched cached model is available (the caller
+    then keeps the structure's existing predictions).
+    """
+    version = _KERNEL_VERSION if backend == "sklearn" else _GPYTORCH_VERSION
+    models = {}
+    for name in ("gpr_density.pkl", "gpr_energy.pkl"):
+        path = os.path.join(data_dir, name)
+        if not exists(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                blob = pickle.load(f)
+        except Exception:
+            return None
+        if not isinstance(blob, dict) or blob.get("version") != version:
+            return None
+        models[name] = blob["model"]
+    try:
+        data = np.loadtxt(os.path.join(data_dir, "feature_mlp.csv"),
+                          delimiter=",", skiprows=1)
+        X_raw = data[:, 1:]
+        scaler = preprocessing.StandardScaler().fit(X_raw)
+    except Exception:
+        return None
+    X_ = scaler.transform(np.asarray(feature, dtype=float).reshape(1, -1))
+    mu_den, sd_den = _gp_predict(models["gpr_density.pkl"], X_)
+    mu_eng, sd_eng = _gp_predict(models["gpr_energy.pkl"], X_)
+    return {
+        "density_gp": float(mu_den[0]),
+        "energy_pred": float(mu_eng[0]),
+        "uncertainty": float(1.96 * sd_den[0]),
+        "uncertainty_eng": float(1.96 * sd_eng[0]),
+    }
+
+
 def load_gaussian_process(X, y, y_eng, backend="gpytorch",
                           training_iter=200, learning_rate=0.1,
                           log_dir=None):

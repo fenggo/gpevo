@@ -28,6 +28,17 @@ def _prepare(child, source, ORG, how_come, step):
     if total_ions > 0:
         enthalpy = enthalpy / total_ions
     child.Parents = [AttrDict(parent=str(getattr(source, "Number", "")), enthalpy=enthalpy)]
+
+    # A kept-best skips its GP step next generation (Step is already past
+    # abinitioCode), so refresh its GP scalars with the current model using the
+    # geometry-only gp_feature it inherited.  Otherwise a model retrained at the
+    # end of this generation leaves the carried fitness stale and misdirects
+    # ranking / parent selection.  Lazy + guarded: never abort the elitist step.
+    try:
+        from gpevo.FunctionFolder.USPEX.src.gp_ml import refresh_kept_best_gp_metrics
+        refresh_kept_best_gp_metrics(child, ORG)
+    except Exception:
+        pass
     return child
 
 

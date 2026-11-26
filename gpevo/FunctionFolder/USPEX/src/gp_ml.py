@@ -375,6 +375,71 @@ def _prune_feature_cache(numbers):
         del _FEATURE_CACHE[key]
 
 
+def _persisted_feature(s):
+    """Validated ``gp_feature`` stored on a structure, or None.
+
+    ``apply_gp_metrics`` writes the 10-D feature onto every structure during
+    the GP step, and the structure is pickled into ``Current_POP.pkl``.  Unlike
+    ``_FEATURE_CACHE`` this survives restarts and generation boundaries, so a
+    restarted run can still hand pred() the feature instead of re-running the
+    ReaxFF optimisation and four GULP energy decompositions.  A malformed or
+    non-finite vector is rejected so pred() recomputes it from scratch.
+    """
+    feature = getattr(s, "gp_feature", None)
+    if not isinstance(feature, (list, tuple)) or len(feature) != _FEATURE_LEN:
+        return None
+    try:
+        values = [float(value) for value in feature]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in values):
+        return None
+    return values
+
+
+def refresh_kept_best_gp_metrics(s, ORG):
+    """Re-predict a kept-best structure's GP scalars with the *current* model.
+
+    A structure carried into the next generation skips its GP step (its
+    ``Step`` is already past ``abinitioCode``), so its ``density_gp``/``energy_gp``
+    would otherwise stay at the *old* model's prediction while the surrogate
+    was retrained at the end of the last generation.  That stale fitness then
+    drives ranking / tournament / the next elitist choice.  Since the 10-D
+    ``gp_feature`` is geometry-only and already on the structure, refreshing is
+    just a StandardScaler transform + two GP posterior evaluations -- no GULP,
+    ReaxFF or DFT.
+
+    Writes the same scalars as ``apply_pred_metrics`` so every consumer
+    (CalcFitness, EI, OUTPUT.txt) stays consistent.  Returns True on success,
+    False when gp is off, the feature is missing, or no cached model exists.
+    Never raises -- an elitist refresh must not abort the generation.
+    """
+    if not gp_enabled(ORG):
+        return False
+    feature = _persisted_feature(s)
+    if feature is None:
+        return False
+    try:
+        from gpevo.uspexkit.core import predict_from_feature
+        _, _, data_dir = gp_data_paths(ORG)
+        params = parse_gp_params(ORG)
+        result = predict_from_feature(feature, data_dir,
+                                      backend=params["backend"])
+        if not isinstance(result, dict):
+            return False
+        s.density_gp = _finite(result.get("density_gp"))
+        s.energy_gp = _finite(result.get("energy_pred"))
+        s.uq = _finite(result.get("uncertainty"))
+        s.uq_eng = _finite(result.get("uncertainty_eng"))
+        s.sigma_gp = _to_sigma(result.get("uncertainty"))
+        s.sigma_eng = _to_sigma(result.get("uncertainty_eng"))
+        s.gp_pred = dict(result)
+        return True
+    except Exception as exc:
+        console_print(f"  Kept-best GP refresh skipped: {exc}")
+        return False
+
+
 # Columns appended after SYMMETRY in the OUTPUT.txt table when `1 : gp` is
 # set: the GP-predicted enthalpy with its uncertainty (UC), then the
 # GP-predicted density with its uncertainty.  The widths (12/10/12/10) match
@@ -1451,9 +1516,21 @@ def _gp_active_learning(ORG, POP, fitness):
     # one ReaxFF optimisation and four GULP runs per crystal.
     features = {}
     if _features_reusable(ORG):
-        features = {i: _FEATURE_CACHE[i] for i in pred_ids if i in _FEATURE_CACHE}
+        # Prefer this generation's in-process GP-step cache, then fall back to
+        # the feature persisted on each structure (Current_POP.pkl survives a
+        # restart, unlike the module-level cache).  Keyed by the global Number
+        # pred() uses.  Either way the ReaxFF re-optimisation is skipped.
+        by_number = {number: POP.POPULATION[index]
+                     for index, number in zip(valid, numbers)}
+        for i in pred_ids:
+            if i in _FEATURE_CACHE:
+                features[i] = list(_FEATURE_CACHE[i])
+            else:
+                persisted = _persisted_feature(by_number.get(i))
+                if persisted is not None:
+                    features[i] = persisted
         if features:
-            console_print(f"  pred: reusing the GP-step feature for "
+            console_print(f"  pred: reusing cached/persisted feature for "
                           f"{len(features)}/{len(pred_ids)} crystal(s), "
                           f"skipping their ReaxFF re-optimisation")
     if not _backend_ready(params["backend"]):
