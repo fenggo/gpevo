@@ -382,6 +382,79 @@ def test_pred_receives_the_features_the_gp_step_computed(run, monkeypatch):
     assert features[11] == [11.0] * 10
 
 
+def test_pred_reuses_persisted_feature_after_restart(run, monkeypatch):
+    """A restart loses the in-process cache but not ``s.gp_feature``.
+
+    The structure is pickled into Current_POP.pkl with its feature, so pred()
+    must still receive it -- otherwise a resumed run re-runs ReaxFF + four
+    GULP calls for every crystal it re-predicts.
+    """
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    # Simulate loading from Current_POP.pkl: the feature is on the structure,
+    # the module-level cache is empty (fresh process).
+    for number, s in zip([11, 12], population.POPULATION):
+        s.gp_feature = [float(number)] * 10
+    monkeypatch.setattr(gp_ml, "_FEATURE_CACHE", {})
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(_org(home, res_folder, k=1),
+                       population, np.array([-1.0, -1.0]))
+
+    features = [c[2]["features"] for c in fake.calls if c[0] == "pred"][0]
+    assert sorted(features) == [11, 12]
+    assert features[11] == [11.0] * 10
+    assert features[12] == [12.0] * 10
+
+
+def test_pred_prefers_in_process_cache_over_persisted_feature(run, monkeypatch):
+    """The GP step of the current generation is fresher than the pickled one."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    for s in population.POPULATION:
+        s.gp_feature = [1.0] * 10            # stale, from parent geometry
+    monkeypatch.setattr(gp_ml, "_FEATURE_CACHE", {11: [9.0] * 10})
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(_org(home, res_folder, k=1),
+                       population, np.array([-1.0, -1.0]))
+
+    features = [c[2]["features"] for c in fake.calls if c[0] == "pred"][0]
+    assert features[11] == [9.0] * 10        # fresh cache wins
+    assert features[12] == [1.0] * 10        # persisted fallback for the rest
+
+
+def test_pred_skips_malformed_persisted_features(run, monkeypatch):
+    """A wrong-length / non-finite vector must not poison pred()."""
+    home, res_folder, data_dir = run
+    _write_db(data_dir, 4)
+    population = struct(generation=2, POPULATION=[
+        _individual(11, density_gp=1.90, sigma=0.05),
+        _individual(12, density_gp=1.95, sigma=0.05),
+    ])
+    population.POPULATION[0].gp_feature = [1.0] * 9        # wrong length
+    population.POPULATION[1].gp_feature = [float("nan")] * 10
+    monkeypatch.setattr(gp_ml, "_FEATURE_CACHE", {})
+    fake = _FakeCalls()
+    monkeypatch.setattr(gp_ml, "_call", fake)
+
+    gp_active_learning(_org(home, res_folder, k=1),
+                       population, np.array([-1.0, -1.0]))
+
+    features = [c[2]["features"] for c in fake.calls if c[0] == "pred"][0]
+    assert features is None                  # pred() recomputes both from scratch
+
+
 def test_feature_cache_is_switched_off_by_input(run, monkeypatch):
     """`0 : cache` in INPUT.txt must fall back to recomputing."""
     home, res_folder, data_dir = run
