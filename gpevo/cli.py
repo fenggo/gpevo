@@ -329,6 +329,25 @@ def _build_parser():
                               help="report duplicates but write no output trajectory")
     parser_dedup.add_argument("--quiet", action="store_true",
                               help="suppress the human-readable report")
+    parser_pc = subparsers.add_parser(
+        "packing",
+        help="compute molecular packing coefficients from an ASE trajectory",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser_pc.add_argument("traj", help="input trajectory (ASE .traj / POSCAR / CIF)")
+    parser_pc.add_argument("-o", "--output", default=None,
+                           help="write per-frame packing coefficients to this CSV")
+    parser_pc.add_argument("--grid", type=int, default=60,
+                           help="grid resolution per cell axis for the vdW union")
+    parser_pc.add_argument("--radii", choices=("ase", "rdkit"), default="ase",
+                           help="vdW radius table: 'ase' (default) or 'rdkit' "
+                                "(hard-coded, matches RDKit ComputeMolVolume)")
+    parser_pc.add_argument("--first", type=int, default=0,
+                           help="first frame index (0-based)")
+    parser_pc.add_argument("--last", type=int, default=None,
+                           help="last frame index (exclusive); default: all")
+    parser_pc.add_argument("--quiet", action="store_true",
+                           help="suppress the human-readable table")
 
     return parser
 
@@ -444,6 +463,12 @@ def main(argv=None):
               angle_tol=args.angle_tol, keep_id=args.keep_id,
               dry_run=args.dry_run, quiet=args.quiet,
               packing_traj=args.packing_traj)
+        return
+    if args.command == "packing":
+        from gpevo.tools.packing_coefficient import packing
+        packing(traj=args.traj, output=args.output, grid=args.grid,
+                first=args.first, last=args.last, quiet=args.quiet,
+                radii=args.radii)
         return
 
     raise SystemExit(f"unknown command: {args.command}")

@@ -414,6 +414,17 @@ with GP sigmas. Options: `--n`, `--n-estimators`, `--n-jobs` (default `-1`, all
 cores). `rft(path, n, seed, plot, n_estimators, n_jobs, prefix)` is also
 callable from Python.
 
+### `gpevo packing`
+
+Computes the molecular **packing coefficient** PC = V_vdW / V_cell of every frame in an ASE trajectory:
+
+```bash
+gpevo packing results1/Individuals.traj
+gpevo packing results1/Individuals.traj -o pc.csv --grid 60
+```
+
+V_vdW is the volume occupied by the **union** of all atomic van der Wa spheres (minimum-image, periodic), sampled on a `grid**3` mesh. Overlaps — inside a molecule and between neighbours — are counted **once**, so PC stays physical (< 1) and no molecule/bond detection is needed. Radii come from ASE's `vdw_radii` table (bundled with ase, no new dependency); `--radii rdkit` switches to RDKit's `GetRvdw` table (hard-coded, no rdkit install) and matches `AllChem.ComputeMolVolume` to ~0.5%. Naively summing `4/3*pi*r**3` per atom overcounts overlaps and gives PC > 1 (e.g. 1.40 on ct22), which is wrong. `--grid 60` converges PC to ~1e-3 for typical cells. Optionally writes a CSV with per-frame PC, V_vdW, V_cell and enthalpy.
+
 ### `gpevo ei-report`
 
 Reads what has **already been written to disk** in a run directory (no GP/ReaxFF recomputation) — `results1/Individuals` (density of every structure in every generation), `results1/OUTPUT.txt` (the `Enthalpy(GP) UC Density(GP) UC Residual` block at the end of each generation's SUMMARY table, i.e. the GP mean μ and its uncertainty), `results1/density.log` (DFT reference), `ei.log` (ids EI sent to DFT each generation), `log` (`GP learning curve` lines) — and draws three figures plus a per-generation report:
