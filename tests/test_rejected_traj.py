@@ -14,7 +14,8 @@ import pytest
 
 from gpevo.runtime import G, AttrDict, struct
 from gpevo.FunctionFolder.USPEX.src.WriteIndividualsTraj import (
-    append_rejected_traj, _REJECTED_FLAG,
+    append_rejected_traj, snapshot_pre_gulp, _REJECTED_FLAG,
+    _PRE_GULP_MOLCOOR, _PRE_GULP_LATTICE,
 )
 from gpevo.FunctionFolder.USPEX.src.residual_check import mark_fake_residual
 from gpevo.FunctionFolder.AbinitCode.readMOL import _check_molecules
@@ -50,13 +51,25 @@ def _structure(residual=12657.0):
     s = struct(
         Enthalpies=[-100.0], Step=[4], Error=0, residual=residual,
         distance=residual, Number=42,
-        numIons=[1, 2],
+        numIons=[1, 2], typesAList=[6, 1, 1],
         LATTICE=(20.0 * np.eye(3)).tolist(),
         COORDINATES=([[0.0, 0.0, 0.0],
                       [1.09, 0.0, 0.0],
                       [-1.09, 0.0, 0.0]]),
     )
     return s
+
+
+def _snapshot(s, molcoors=None):
+    """Attach the pre-GULP geometry (molecule-sequential CH2) to *s*."""
+    if molcoors is None:
+        molcoors = np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0],
+                             [-1.1, 0.0, 0.0]], dtype=float)
+    mol = AttrDict()
+    mol.MOLCOORS = molcoors
+    s.MOLECULES = [mol]
+    snapshot_pre_gulp(s)
+    return np.array(molcoors, copy=True)
 
 
 def _frames(path):
@@ -86,6 +99,7 @@ def test_helper_writes_geometry_and_provenance_only(tmp_path):
     assert atoms.info["Number"] == 42
     assert atoms.info["residual"] == pytest.approx(12657.0)
     assert "FAKE low-energy" in atoms.info["moleculeCheck"]
+    assert atoms.info["geometry"] == "post_gulp"       # no snapshot: fallback
     # No physical energy: the 100000 sentinel must not become a label.
     assert atoms.calc is None
     assert getattr(s, _REJECTED_FLAG) is True
@@ -159,3 +173,100 @@ def test_damaged_molecule_writes_frame(tmp_path):
     frames = _frames(tmp_path / "results1" / "rejected.traj")
     assert len(frames) == 1
     assert frames[0].info["reason"] == "molecule_damaged"
+    assert frames[0].info["geometry"] == "post_gulp"
+
+
+# --------------------------------------------------------------------------
+# pre-GULP snapshot
+# --------------------------------------------------------------------------
+
+def test_snapshot_captures_molecule_geometry_and_lattice(tmp_path):
+    _setup(tmp_path)
+    s = _structure()
+    molcoors = _snapshot(s)
+    assert np.allclose(getattr(s, _PRE_GULP_MOLCOOR), molcoors)
+    assert np.allclose(getattr(s, _PRE_GULP_LATTICE), s.LATTICE)
+    # MOLCOORS are independent copies: later damage must not corrupt the
+    # snapshot.
+    s.MOLECULES[0].MOLCOORS[1] = [0.5, 0.0, 0.0]
+    assert np.allclose(getattr(s, _PRE_GULP_MOLCOOR), molcoors)
+
+
+def test_snapshot_is_noop_without_molecules(tmp_path):
+    _setup(tmp_path)
+    s = _structure()
+    snapshot_pre_gulp(s)
+    assert not hasattr(s, _PRE_GULP_MOLCOOR)
+
+
+def test_helper_prefers_pre_gulp_geometry(tmp_path):
+    _setup(tmp_path)
+    s = _structure()
+    molcoors = _snapshot(s)
+    # Simulate Reading.py: GULP results overwrite the individual with the
+    # damaged geometry/matrix, then rejection fires.
+    s.COORDINATES = ([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+                      [0.6, 0.0, 0.0]])
+    s.LATTICE = (10.0 * np.eye(3)).tolist()
+    assert append_rejected_traj(s, "molecule_damaged", generation=7) is True
+
+    atoms = _frames(tmp_path / "results1" / "rejected.traj")[0]
+    assert atoms.info["geometry"] == "pre_gulp"
+    assert atoms.get_chemical_symbols() == ["C", "H", "H"]
+    assert np.allclose(atoms.get_positions(), molcoors)
+    assert np.allclose(atoms.cell.array, 20.0 * np.eye(3))
+
+
+def test_damaged_molecule_writes_pre_gulp_geometry(tmp_path):
+    _setup(tmp_path)
+    s = _structure()
+    good = _snapshot(s)
+    damaged = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+                        [0.6, 0.0, 0.0]])
+    mol = AttrDict()
+    mol.MOLCOORS = damaged
+    mol.ZMATRIX = np.zeros((3, 1))
+    s.MOLECULES = [mol]
+    s.MtypeLIST = [1]
+    s.COORDINATES = (damaged / 20.0).tolist()
+    _check_molecules(s, label="42")
+
+    atoms = _frames(tmp_path / "results1" / "rejected.traj")[0]
+    assert atoms.info["reason"] == "molecule_damaged"
+    assert atoms.info["geometry"] == "pre_gulp"
+    assert np.allclose(atoms.get_positions(), good)
+
+
+def test_reading_snapshots_before_relaxation_overwrite(tmp_path, monkeypatch):
+    from gpevo.FunctionFolder.USPEX.src import Reading as reading_mod
+
+    _setup(tmp_path)
+    ORG, POP = G["ORG_STRUC"], G["POP_STRUC"]
+    ORG.homePath = str(tmp_path)
+    ORG.abinitioCode = [3]
+    ORG.molecule = 1
+    (tmp_path / "CalcFold1").mkdir()
+
+    s = _structure()
+    s.Step = 1                        # Reading() expects a scalar step
+    good = _snapshot(s)
+    POP.POPULATION = [s]
+
+    damaged_coor = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+                             [0.6, 0.0, 0.0]]) / 20.0
+    damaged_lat = 10.0 * np.eye(3)
+    monkeypatch.setattr(reading_mod, "Read_AbinitCode",
+                        lambda code, flag: 1 if flag == 0 else -100.0)
+    monkeypatch.setattr(reading_mod, "Read_GULP_Structure",
+                        lambda: (damaged_coor, damaged_lat))
+    monkeypatch.setattr(reading_mod, "readMOL",
+                        lambda idx, code: append_rejected_traj(
+                            s, "molecule_damaged"))
+
+    assert reading_mod.Reading(3, 0, 1) == 0
+    atoms = _frames(tmp_path / "results1" / "rejected.traj")[0]
+    assert atoms.info["geometry"] == "pre_gulp"
+    assert np.allclose(atoms.get_positions(), good)
+    # Reading() still applies the relaxed geometry to the individual.
+    assert np.allclose(np.asarray(s.COORDINATES), damaged_coor)
+    assert np.allclose(np.asarray(s.LATTICE), damaged_lat)

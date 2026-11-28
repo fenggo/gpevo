@@ -4,7 +4,9 @@
 below).  ``resFolder/rejected.traj`` holds the geometries the EA throws away
 -- damaged molecules (readMOL) and fake low-energy structures (GP residual
 screen) -- for later force-field training; those frames carry provenance only
-and no single-point energy.
+and no single-point energy.  When a pre-GULP snapshot is available the frame
+stores the geometry *fed to* GULP rather than the (possibly damaged) relaxed
+one; ``atoms.info['geometry']`` records which of the two it is.
 
 ``gatheredPOSCARS`` (and ``Individuals``) are plain text, so reading a run back
 for analysis needs a parser.  ``Individuals.traj`` is the ASE-readable twin of
@@ -186,6 +188,61 @@ def append_individuals_traj(res_folder, s, atom_type, generation=0):
 # single-point energy (it is a failure marker, not a physical label).
 _REJECTED_FLAG = "rejectedTrajSaved"
 
+# Pre-GULP geometry snapshot.  ``Write_GULP_MOL`` builds GULP's ``input`` from
+# ``MOLECULES[].MOLCOORS`` (Cartesian, molecule-sequential), not from
+# ``s.COORDINATES`` -- the latter is stale for mutated offspring, which only
+# rewrite MOLCOORS.  ``Reading`` calls snapshot_pre_gulp() just before it
+# overwrites the individual with the relaxed structure; a rejected structure
+# then keeps the geometry that actually went into GULP.
+_PRE_GULP_MOLCOOR = "MOLCOORS_pre_gulp"
+_PRE_GULP_LATTICE = "LATTICE_pre_gulp"
+
+
+def snapshot_pre_gulp(s):
+    """Copy the geometry handed to GULP onto *s* before Reading() overwrites it.
+
+    Called once per relaxation step, before ``Read_GULP_Structure`` results
+    replace ``s.COORDINATES``/``s.LATTICE`` and ``readMOL`` rebuilds
+    ``s.MOLECULES``.  Never raises: this is only training-data bookkeeping.
+    """
+    try:
+        molecules = list(getattr(s, "MOLECULES", None) or [])
+        if not molecules:
+            return
+        coor = [np.asarray(mol.MOLCOORS, dtype=float).reshape(-1, 3)
+                for mol in molecules]
+        setattr(s, _PRE_GULP_MOLCOOR, np.concatenate(coor, axis=0).copy())
+        setattr(s, _PRE_GULP_LATTICE,
+                np.asarray(s.LATTICE, dtype=float).copy())
+    except Exception:
+        pass
+
+
+def _atoms_pre_gulp(s):
+    """ASE Atoms of the snapshot geometry fed to GULP, or None if unusable.
+
+    positions are the Cartesian ``MOLCOORS`` in molecule-sequential order;
+    ``typesAList`` holds the matching atomic numbers in that same order
+    (Write_GULP_MOL.py:41-49 reads them side by side).
+    """
+    mol_coor = getattr(s, _PRE_GULP_MOLCOOR, None)
+    lattice = getattr(s, _PRE_GULP_LATTICE, None)
+    if mol_coor is None or lattice is None:
+        return None
+    from ase import Atoms
+
+    mol_coor = np.asarray(mol_coor, dtype=float).reshape(-1, 3)
+    lattice = np.asarray(lattice, dtype=float).reshape(3, 3)
+    types = getattr(s, "typesAList", None)
+    if types is None:
+        return None
+    symbols = [_symbol(int(z)) for z in np.asarray(types, dtype=float).reshape(-1)]
+    if not symbols or len(symbols) != len(mol_coor):
+        return None
+    if not np.all(np.isfinite(lattice)) or not np.all(np.isfinite(mol_coor)):
+        return None
+    return Atoms(symbols=symbols, positions=mol_coor, cell=lattice, pbc=True)
+
 
 def append_rejected_traj(s, reason, generation=0):
     """Append one rejected structure to ``resFolder/rejected.traj``.
@@ -221,14 +278,20 @@ def append_rejected_traj(s, reason, generation=0):
     atom_type = list(getattr(ORG, "atomType", []))
     generation = int(generation or getattr(G.get("POP_STRUC"), "generation", 0) or 0)
     path = os.path.join(res_folder, "rejected.traj")
+    geometry = "post_gulp"
     try:
-        atoms = _atoms(s, atom_type)
+        atoms = _atoms_pre_gulp(s)
+        if atoms is not None:
+            geometry = "pre_gulp"
+        else:
+            atoms = _atoms(s, atom_type)
     except Exception as exc:
         console_print(f"  Warning: rejected.traj skipped structure "
                       f"{getattr(s, 'Number', '?')}: {exc}")
         return False
 
-    info = {"reason": str(reason), "generation": generation}
+    info = {"reason": str(reason), "generation": generation,
+            "geometry": geometry}
     number = getattr(s, "Number", None)
     try:
         number = int(number)

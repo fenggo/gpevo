@@ -9,6 +9,7 @@ from gpevo.FunctionFolder.AbinitCode.Read_AbinitCode import Read_AbinitCode
 from gpevo.FunctionFolder.AbinitCode.Read_GULP_Structure import Read_GULP_Structure
 from gpevo.FunctionFolder.AbinitCode.readMOL import readMOL
 from gpevo.FunctionFolder.sys.distanceCheck import distanceCheck
+from gpevo.FunctionFolder.USPEX.src.WriteIndividualsTraj import snapshot_pre_gulp
 
 
 def Reading(code, ind_no, indic):
@@ -43,6 +44,11 @@ def Reading(code, ind_no, indic):
 
         good_bad = Read_AbinitCode(code, 0)
         if good_bad == 1:
+            # Keep the geometry actually fed to GULP (MOLECULES[].MOLCOORS +
+            # LATTICE) before the relaxed structure overwrites the individual.
+            # A rejection later in this call stack can then store the pre-GULP
+            # geometry in rejected.traj instead of the damaged one.
+            snapshot_pre_gulp(s)
             coords, lattice = Read_GULP_Structure()
             s.COORDINATES = coords
             s.LATTICE = lattice
